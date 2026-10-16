@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str
     qdrant_url: str
+    admin_api_key: str
 
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None

@@ -7,7 +7,8 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import dispose_engine
-
+from app.modules.tenants.router import router as tenants_router
+from app.modules.tenants.router import me_router
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     log = structlog.get_logger()
@@ -15,6 +16,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     await dispose_engine()
     await log.ainfo("app.shutdown")
+
 
 
 def create_app() -> FastAPI:
@@ -37,3 +39,6 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+app.include_router(tenants_router, prefix="/api/v1")
+app.include_router(me_router, prefix="/api/v1")
