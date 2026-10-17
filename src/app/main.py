@@ -9,12 +9,19 @@ from app.core.logging import configure_logging
 from app.db.session import dispose_engine
 from app.modules.tenants.router import router as tenants_router
 from app.modules.tenants.router import me_router
+
+from app.integrations.qdrant.client import close_qdrant, init_qdrant
+from app.integrations.qdrant.collection import ensure_collection
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     log = structlog.get_logger()
+    client = init_qdrant()
+    await ensure_collection(client)
     await log.ainfo("app.startup", env=get_settings().app_env)
     yield
     await dispose_engine()
+    await close_qdrant()
     await log.ainfo("app.shutdown")
 
 
