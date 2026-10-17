@@ -10,15 +10,18 @@ class Settings(BaseSettings):
 
     app_env: Literal["development", "staging", "production"] = "development"
     log_level: str = "INFO"
-    secret_key: SecretStr
-
+    secret_key: SecretStr 
     database_url: str
     redis_url: str
-    qdrant_url: str
     admin_api_key: str
-
-    anthropic_api_key: SecretStr | None = None
-    openai_api_key: SecretStr | None = None
+    # Qdrant
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: str | None = None
+    qdrant_collection: str = "knowledge_chunks"
+    qdrant_timeout_seconds: int = 30
+    # Embeddings
+    embedding_dimension: int = 2048
+    # anthropic_api_key: SecretStr | None = None
 
     @property
     def is_production(self) -> bool:
