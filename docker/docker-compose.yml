@@ -9,6 +9,7 @@ x-app: &app
   volumes:
     - ../src:/app/src
     - ../migrations:/app/migrations
+    - uploads:/app/var/uploads
   depends_on:
     postgres:
       condition: service_healthy
@@ -68,3 +69,4 @@ volumes:
   pgdata:
   redisdata:
   qdrantdata:
+  uploads:

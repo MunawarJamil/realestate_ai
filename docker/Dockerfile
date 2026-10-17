@@ -32,6 +32,8 @@ WORKDIR /app
 
 COPY --from=builder --chown=appuser:appuser /app /app
 
+RUN mkdir -p /app/var/uploads && chown -R appuser:appuser /app/var
+
 USER appuser
 
 EXPOSE 8000

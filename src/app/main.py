@@ -12,16 +12,19 @@ from app.integrations.qdrant.client import close_qdrant, init_qdrant
 from app.integrations.qdrant.collection import ensure_collection
 from app.modules.tenants.router import me_router
 from app.modules.tenants.router import router as tenants_router
-
+from app.modules.knowledge.router import router as knowledge_router
+from app.workers.queue import close_queue, init_queue
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     log = structlog.get_logger()
     client = init_qdrant()
     init_embedding_client()
+    await init_queue()
     await ensure_collection(client)
     await log.ainfo("app.startup", env=get_settings().app_env)
     yield
+    await close_queue()
     await dispose_engine()
     await close_qdrant()
     await close_embedding_client()
@@ -52,3 +55,4 @@ app = create_app()
 
 app.include_router(tenants_router, prefix="/api/v1")
 app.include_router(me_router, prefix="/api/v1")
+app.include_router(knowledge_router, prefix="/api/v1")

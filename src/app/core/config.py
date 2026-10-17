@@ -1,4 +1,8 @@
+from pydantic import model_validator
+from typing import Self
+from pydantic import Field
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import SecretStr
@@ -31,12 +35,34 @@ class Settings(BaseSettings):
     embedding_max_concurrency: int = 2
     embedding_timeout_seconds: float = 60.0
     embedding_max_retries: int = 5
+    # Chunking (sizes are in characters; ~4 chars per token for English)
+    chunk_size_chars: int = Field(default=1500, gt=0)
+    chunk_overlap_chars: int = Field(default=200, ge=0)
+    # Ingestion
+    max_chunks_per_document: int = Field(default=2000, gt=0)
+    ingestion_batch_size: int = Field(default=64, gt=0)
+    # File storage (local disk now; swap implementation for S3 later)
+    storage_local_dir: Path = Path("var/uploads")
+    # Uploads
+    max_upload_bytes: int = Field(default=20 * 1024 * 1024, gt=0)
+
+
+    # Retrieval
+    retrieval_top_k: int = Field(default=5, ge=1, le=50)
+    retrieval_score_threshold: float | None = None
+
 
 
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
 
+
+    @model_validator(mode="after")
+    def _validate_chunking(self) -> Self:
+        if self.chunk_overlap_chars >= self.chunk_size_chars:
+            raise ValueError("CHUNK_OVERLAP_CHARS must be smaller than CHUNK_SIZE_CHARS")
+        return self
 
 @lru_cache
 def get_settings() -> Settings:
