@@ -1,6 +1,6 @@
-from app.core.config import get_settings
 from qdrant_client import AsyncQdrantClient
 
+from app.core.config import get_settings
 
 _client: AsyncQdrantClient | None = None
 

@@ -1,8 +1,8 @@
-from app.core.config import get_settings
 import logging
 
 from qdrant_client import AsyncQdrantClient, models
 
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,9 @@ async def _validate_collection(client: AsyncQdrantClient, name: str) -> None:
     info = await client.get_collection(name)
     vectors = info.config.params.vectors
     if not isinstance(vectors, models.VectorParams):
-        raise RuntimeError(f"Collection '{name}' uses named vectors; expected a single vector config.")
+        raise RuntimeError(
+            f"Collection '{name}' uses named vectors; expected a single vector config."
+        )
     if vectors.size != settings.embedding_dimension:
         raise RuntimeError(
             f"Collection '{name}' has dimension {vectors.size}, "

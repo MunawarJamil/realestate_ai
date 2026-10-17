@@ -42,22 +42,27 @@
 
 ---
 
-### [ ] Phase 2: Document Management & Knowledge Base (IN PROGRESS 🟡)
+### [ ] Phase 2: Knowledge Base & Document Management (`src/app/modules/knowledge/`) (IN PROGRESS 🟡)
+- [x] Consolidate `modules/documents` into `modules/knowledge`
 - [x] `enums.py`: `DocumentStatus` (pending, processing, ready, failed)
-- [x] `models.py`: `Document` model with tenant isolation, checksum deduplication, and JSONB metadata
-- [x] Database Migration: `20261017_0548_486f6cca0602_create_documents_table.py` generated and applied
+- [x] `models.py`: `KnowledgeDocument` model with tenant isolation, checksum deduplication, and JSONB metadata
+- [x] Database Migration: `20261017_0818_2e5fb9c2154e_create_knowledge_documents_table.py` generated and applied
 - [ ] `schemas.py`: Pydantic schemas for document upload, read, and list
 - [ ] `repository.py`: Document CRUD operations scoped strictly by `tenant_id`
 - [ ] Storage Service: Local file storage / S3 adapter for raw PDF storage
 - [ ] `service.py`: Upload validation (MIME, size, checksum), DB persistence, ARQ dispatch
-- [ ] `router.py`: Upload and management endpoints (`/api/v1/documents`)
+- [ ] `router.py`: Upload and management endpoints (`/api/v1/knowledge`)
 
 ---
 
-### [ ] Phase 3: Background Worker & RAG Ingestion Pipeline
+### [ ] Phase 3: Background Worker & RAG Ingestion Pipeline (IN PROGRESS 🟡)
+- [x] `EmbeddingProvider` Protocol definition (`src/app/integrations/embeddings/base.py`)
+- [x] OpenRouter async `EmbeddingClient` with batching, bounded concurrency, and exponential backoff (`src/app/integrations/embeddings/client.py`)
+- [x] Embedding exceptions (`EmbeddingError`, `EmbeddingDimensionError`)
+- [x] FastAPI lifespan integration (`init_embedding_client`, `close_embedding_client`)
+- [x] Unit & integration test suite (21 passing tests in `tests/unit` & `tests/integration`)
 - [ ] Text extraction service (PDF parsing via `pypdf`, Markdown parser)
 - [ ] Semantic & token-aware chunking engine
-- [ ] Embedding generation integration (Voyage AI / OpenAI in `src/app/integrations/embeddings/`)
 - [ ] Qdrant chunk upsert worker task (with strict `tenant_id` and `document_id` payload tags)
 - [ ] ARQ worker tasks (`src/app/workers/tasks.py`) & lifecycle handling
 

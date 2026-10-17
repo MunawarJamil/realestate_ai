@@ -7,21 +7,24 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import dispose_engine
-from app.modules.tenants.router import router as tenants_router
-from app.modules.tenants.router import me_router
-
+from app.integrations.embeddings.client import close_embedding_client, init_embedding_client
 from app.integrations.qdrant.client import close_qdrant, init_qdrant
 from app.integrations.qdrant.collection import ensure_collection
+from app.modules.tenants.router import me_router
+from app.modules.tenants.router import router as tenants_router
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     log = structlog.get_logger()
     client = init_qdrant()
+    init_embedding_client()
     await ensure_collection(client)
     await log.ainfo("app.startup", env=get_settings().app_env)
     yield
     await dispose_engine()
     await close_qdrant()
+    await close_embedding_client()
     await log.ainfo("app.shutdown")
 
 

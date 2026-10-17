@@ -22,6 +22,16 @@ class Settings(BaseSettings):
     # Embeddings
     embedding_dimension: int = 2048
     # anthropic_api_key: SecretStr | None = None
+    
+    # OpenRouter / Embeddings
+    openrouter_api_key: SecretStr = SecretStr("")
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    embedding_model: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
+    embedding_batch_size: int = 32
+    embedding_max_concurrency: int = 2
+    embedding_timeout_seconds: float = 60.0
+    embedding_max_retries: int = 5
+
 
     @property
     def is_production(self) -> bool:

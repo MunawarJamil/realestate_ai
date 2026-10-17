@@ -1,19 +1,16 @@
-from app.core.config import Settings, get_settings
 import secrets
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-
+from app.core.config import Settings, get_settings
 from app.db.session import get_session  # this is the session dependency used in fast API endpoints
+from app.modules.tenants.dependencies import get_current_tenant
 from app.modules.tenants.exceptions import TenantSlugTakenError
+from app.modules.tenants.models import Tenant
 from app.modules.tenants.repository import TenantRepository
 from app.modules.tenants.schemas import TenantCreate, TenantCreated, TenantRead
 from app.modules.tenants.service import TenantService
-from app.modules.tenants.dependencies import get_current_tenant
-from app.modules.tenants.models import Tenant
-
-
 
 
 async def require_admin(
@@ -43,8 +40,8 @@ async def create_tenant(
     try:
         result = await service.create_tenant(name=payload.name, slug=payload.slug)
         await session.commit()
-    except TenantSlugTakenError:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Slug already taken")
+    except TenantSlugTakenError as err:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Slug already taken") from err
 
     return TenantCreated(
         **TenantRead.model_validate(result.tenant).model_dump(),
