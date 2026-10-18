@@ -1,18 +1,21 @@
 # PROJECT PROGRESS TRACKER (progress.md)
 
-> **Last Updated**: 2026-10-17  
-> **Current Phase**: Phase 2 - Document Management & Ingestion Pipeline  
-> **Status**: In Progress  
-> **Current File Context**: [`src/app/modules/documents/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/documents/)
+> **Last Updated**: 2026-10-18  
+> **Current Phase**: Phase 5 - Lead Capture & Qualification Pipeline  
+> **Status**: Ready to Start  
+> **Current File Context**: [`src/app/modules/chat/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/chat/)
 
 ---
 
 ## 📌 Quick Summary of Where We Left Off
-- **Tenants Module (`src/app/modules/tenants/`)**: 100% complete with models, repo, service, router, and `X-API-Key` auth.
-- **Documents Module (`src/app/modules/documents/`)**:
-  - `enums.py`: Done (`DocumentStatus`: pending, processing, ready, failed).
-  - `models.py`: Done (`Document` model with multi-tenant FK, SHA256 checksum deduplication, JSONB metadata, non-native enum).
-  - **Immediate Next Step**: Build `schemas.py`, `repository.py`, and `service.py` for document uploads & storage handling.
+- **Phase 0-3 (Core, Tenants, Knowledge Ingestion & Retrieval)**: 100% complete and operational.
+- **Phase 4 / Step 7 (Conversational AI & Streaming RAG)**: 100% complete.
+  - Multi-tenant chat models (`conversations`, `messages`) & Alembic migration applied.
+  - OpenRouter LLM client with env-configurable model.
+  - Real-estate assistant prompt & context formatter with strict grounding.
+  - Full REST and SSE token streaming endpoints verified via PowerShell & curl.
+  - Test suite: 238 passing tests (`pytest`).
+- **Immediate Next Step**: Phase 5 - Lead Capture & Qualification Pipeline (`src/app/modules/leads/`).
 
 ---
 
@@ -68,13 +71,15 @@
 
 ---
 
-### [ ] Phase 4: Conversational AI & Streaming RAG Engine (`src/app/modules/chat/`)
-- [ ] `models.py`: `Conversation` and `Message` models (scoped by `tenant_id`)
-- [ ] Semantic search service (Qdrant similarity search with tenant payload filter)
-- [ ] Prompt construction & System Prompt management (`src/app/prompts/real_estate_assistant.md`)
-- [ ] LLM integration adapter (`src/app/integrations/llm/anthropic.py` / `openai.py`)
-- [ ] Server-Sent Events (SSE) streaming endpoint (`/api/v1/chat/stream`)
-- [ ] Automatic lead detail extractor (budget, bedrooms, timeline, contact info)
+### [x] Phase 4: Conversational AI & Streaming RAG Engine (`src/app/modules/chat/`)
+- [x] `models.py`: `Conversation` and `Message` models (scoped by `tenant_id` with cascading delete and compound indexes)
+- [x] Database migration: `20261018_1720_4f9a1b2c3d4e_create_chat_tables.py` applied
+- [x] LLM client: OpenRouter adapter via `AsyncOpenAI` with env-configurable model (`src/app/integrations/llm/client.py`)
+- [x] System prompt & Context builder: Grounded real-estate prompt (`src/app/prompts/real_estate_assistant.md`) and dynamic chunk formatter (`src/app/modules/chat/prompts.py`)
+- [x] Chat repository & service: Multi-tenant isolated DB persistence and RAG orchestration (`repository.py`, `service.py`)
+- [x] Server-Sent Events (SSE) streaming endpoint: Real-time token streaming (`POST /api/v1/chat/conversations/{id}/stream`)
+- [x] REST API endpoints: Conversation creation, listing, history retrieval (`/api/v1/chat/conversations`)
+- [x] Unit test suite: 24 passing unit tests covering chat models, prompts, repo, service, router, and LLM client (238 total passing tests)
 
 ---
 

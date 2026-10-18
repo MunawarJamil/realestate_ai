@@ -1,11 +1,8 @@
-from pydantic import model_validator
-from typing import Self
-from pydantic import Field
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,11 +43,16 @@ class Settings(BaseSettings):
     # Uploads
     max_upload_bytes: int = Field(default=20 * 1024 * 1024, gt=0)
 
-
     # Retrieval
     retrieval_top_k: int = Field(default=5, ge=1, le=50)
     retrieval_score_threshold: float | None = None
-
+    # LLM
+    llm_base_url: str = "https://openrouter.ai/api/v1"
+    llm_model: str = "meta-llama/llama-3.1-8b-instruct"
+    llm_max_tokens: int = 500
+    llm_temperature: float = 0.3
+    llm_timeout_seconds: float = 30.0
+    llm_max_retries: int = 2
 
 
     @property
