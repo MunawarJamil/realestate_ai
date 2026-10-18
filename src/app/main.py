@@ -15,6 +15,7 @@ from app.modules.chat.router import router as chat_router
 from app.modules.knowledge.router import router as knowledge_router
 from app.modules.tenants.router import me_router
 from app.modules.tenants.router import router as tenants_router
+from app.modules.widget.router import router as widget_router
 from app.workers.queue import close_queue, init_queue
 
 
@@ -55,7 +56,18 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     return app
+
 
 
 app = create_app()
@@ -64,3 +76,4 @@ app.include_router(tenants_router, prefix="/api/v1")
 app.include_router(me_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
+app.include_router(widget_router, prefix="/api/v1")

@@ -38,7 +38,11 @@ async def create_tenant(
 ) -> TenantCreated:
     service = TenantService(TenantRepository(session))
     try:
-        result = await service.create_tenant(name=payload.name, slug=payload.slug)
+        result = await service.create_tenant(
+            name=payload.name,
+            slug=payload.slug,
+            allowed_domains=payload.allowed_domains,
+        )
         await session.commit()
     except TenantSlugTakenError as err:
         raise HTTPException(status.HTTP_409_CONFLICT, "Slug already taken") from err

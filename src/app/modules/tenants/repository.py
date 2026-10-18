@@ -11,13 +11,22 @@ class TenantRepository:
         self._session = session
 
     async def create(
-        self, *, name: str, slug: str, api_key_hash: str, api_key_prefix: str
+        self,
+        *,
+        name: str,
+        slug: str,
+        api_key_hash: str,
+        api_key_prefix: str,
+        widget_key: str,
+        allowed_domains: list[str] | None = None,
     ) -> Tenant:
         tenant = Tenant(
             name=name,
             slug=slug,
             api_key_hash=api_key_hash,
             api_key_prefix=api_key_prefix,
+            widget_key=widget_key,
+            allowed_domains=allowed_domains or [],
         )
         self._session.add(tenant)
         await self._session.flush()  # DB se id/defaults mil jaate hain, commit nahi hota
@@ -37,3 +46,11 @@ class TenantRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_by_widget_key(self, widget_key: str) -> Tenant | None:
+        result = await self._session.execute(
+            select(Tenant).where(
+                Tenant.widget_key == widget_key, Tenant.is_active.is_(True)
+            )
+        )
+        return result.scalar_one_or_none()

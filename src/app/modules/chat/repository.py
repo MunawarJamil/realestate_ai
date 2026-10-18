@@ -61,6 +61,43 @@ class ChatRepository:
         result = await self._session.execute(stmt)
         return result.scalars().all()
 
+    async def list_conversations_for_visitor(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        visitor_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Sequence[Conversation]:
+        stmt = (
+            select(Conversation)
+            .where(
+                Conversation.tenant_id == tenant_id,
+                Conversation.metadata_["visitor_id"].astext == visitor_id,
+            )
+            .order_by(desc(Conversation.created_at))
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalars().all()
+
+    async def get_conversation_for_visitor(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        visitor_id: str,
+    ) -> Conversation | None:
+        stmt = select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.tenant_id == tenant_id,
+            Conversation.metadata_["visitor_id"].astext == visitor_id,
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+
 
     async def delete_conversation(
         self,

@@ -75,6 +75,40 @@ class ChatService:
             offset=offset,
         )
 
+    async def list_conversations_for_visitor(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        visitor_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Sequence[Conversation]:
+        return await self._repository.list_conversations_for_visitor(
+            tenant_id=tenant_id,
+            visitor_id=visitor_id,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def get_conversation_for_visitor(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        visitor_id: str,
+    ) -> Conversation:
+        conversation = await self._repository.get_conversation_for_visitor(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            visitor_id=visitor_id,
+        )
+        if not conversation:
+            raise ConversationNotFoundError(
+                f"Conversation {conversation_id} not found."
+            )
+        return conversation
+
+
     async def list_messages(
         self,
         *,

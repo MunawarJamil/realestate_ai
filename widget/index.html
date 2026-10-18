@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prestige Prime Realty — Embed Test Demonstration</title>
+  <style>
+    :root {
+      --agency-bg: #0C0D10;
+      --agency-card: #15161B;
+      --agency-text: #F3F4F6;
+      --agency-muted: #9CA3AF;
+      --agency-gold: #EAB308;
+      --agency-orange: #F97316;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--agency-bg);
+      color: var(--agency-text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    header {
+      padding: 20px 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(12, 13, 16, 0.85);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .logo {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #FFFFFF;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo span {
+      color: var(--agency-orange);
+    }
+
+    nav {
+      display: flex;
+      gap: 28px;
+    }
+
+    nav a {
+      color: var(--agency-muted);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.2s ease;
+    }
+
+    nav a:hover {
+      color: #FFFFFF;
+    }
+
+    .hero {
+      padding: 80px 48px;
+      max-width: 1200px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      line-height: 1.15;
+      margin-bottom: 20px;
+      background: linear-gradient(180deg, #FFFFFF 0%, #A1A1AA 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero p {
+      font-size: 18px;
+      color: var(--agency-muted);
+      max-width: 640px;
+      margin: 0 auto 36px;
+    }
+
+    .test-controls {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      margin-bottom: 60px;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: var(--agency-card);
+      color: #FFFFFF;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: var(--agency-orange);
+      border-color: var(--agency-orange);
+    }
+
+    .btn-primary:hover {
+      background: #EA580C;
+    }
+
+    .properties-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 28px;
+      max-width: 1200px;
+      margin: 0 auto 80px;
+      padding: 0 48px;
+    }
+
+    .card {
+      background: var(--agency-card);
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      transition: transform 0.25s ease, border-color 0.25s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(249, 115, 22, 0.4);
+    }
+
+    .card-img {
+      height: 200px;
+      background: linear-gradient(135deg, #1E1E24 0%, #2A201B 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--agency-muted);
+      font-size: 14px;
+      position: relative;
+    }
+
+    .card-badge {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      background: rgba(12, 13, 16, 0.8);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--agency-orange);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 6px;
+    }
+
+    .card-body {
+      padding: 20px;
+    }
+
+    .card-price {
+      font-size: 22px;
+      font-weight: 700;
+      color: #FFFFFF;
+      margin-bottom: 6px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #E5E7EB;
+      margin-bottom: 8px;
+    }
+
+    .card-desc {
+      font-size: 13px;
+      color: var(--agency-muted);
+      margin-bottom: 16px;
+    }
+
+    .card-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--agency-muted);
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding-top: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo">
+      PRESTIGE <span>PRIME</span>
+    </div>
+    <nav>
+      <a href="#">Featured</a>
+      <a href="#">Listings</a>
+      <a href="#">Neighborhoods</a>
+      <a href="#">Agents</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <h1>Exceptional Living in Prime Locations</h1>
+    <p>Explore exclusive waterfront villas, penthouses, and architectural masterpieces curated by our luxury advisors.</p>
+    
+    <div class="test-controls">
+      <button class="btn btn-primary" onclick="window.RealEstateAI?.open()">Open Chat Assistant</button>
+      <button class="btn" onclick="window.RealEstateAI?.close()">Close Chat</button>
+      <button class="btn" onclick="console.log(window.RealEstateAI?.getState()); alert('State logged to browser console!')">Inspect State</button>
+    </div>
+  </section>
+
+  <section class="properties-grid">
+    <div class="card">
+      <div class="card-img">
+        <span class="card-badge">Exclusive</span>
+        Luxury Penthouse View
+      </div>
+      <div class="card-body">
+        <div class="card-price">$4,850,000</div>
+        <div class="card-title">Skyline Horizon Penthouse</div>
+        <div class="card-desc">4 Bed • 4.5 Bath • 4,200 sqft panoramic waterfront views with private infinity deck.</div>
+        <div class="card-meta">
+          <span>Downtown Marina</span>
+          <span>MLS #84920</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-img">
+        <span class="card-badge">New Listing</span>
+        Architectural Villa View
+      </div>
+      <div class="card-body">
+        <div class="card-price">$6,200,000</div>
+        <div class="card-title">The Palm Royal Villa</div>
+        <div class="card-desc">6 Bed • 7 Bath • 7,500 sqft private estate with resort pool and smart climate automation.</div>
+        <div class="card-meta">
+          <span>Palm Grove Estates</span>
+          <span>MLS #91043</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-img">
+        <span class="card-badge">Price Drop</span>
+        Modernist Terrace View
+      </div>
+      <div class="card-body">
+        <div class="card-price">$2,450,000</div>
+        <div class="card-title">Modernist Glass Sanctuary</div>
+        <div class="card-desc">3 Bed • 3 Bath • 2,800 sqft floor-to-ceiling glass architecture with subterranean wine cellar.</div>
+        <div class="card-meta">
+          <span>Hillside Ridge</span>
+          <span>MLS #77218</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Embeddable Web Chat Widget Embed Script -->
+  <script 
+    type="module" 
+    src="/src/main.ts"
+    data-widget-key="wk_live_demo_test_key"
+    data-api-url="http://localhost:8000"
+    data-title="Prestige AI Advisor"
+    data-subtitle="Online • Ask anything about properties"
+    data-greeting="Welcome to Prestige Prime Realty! Feel free to ask about our properties, pricing, neighborhood insights, or booking a private tour."
+    data-placeholder="Ask about penthouse pricing, tours, etc..."
+    data-position="bottom-right"
+  ></script>
+
+</body>
+</html>

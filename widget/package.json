@@ -1,0 +1,16 @@
+{
+  "name": "realestate-ai-widget",
+  "version": "0.1.0",
+  "description": "Embeddable multi-tenant real estate AI assistant chat widget",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

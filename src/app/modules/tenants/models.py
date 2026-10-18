@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, String, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -22,10 +22,17 @@ class Tenant(Base):
     # Pehle 8 chars, taake dashboard mein key pehchani ja sake ("rk_live_ab12...")
     api_key_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
 
+    # Public widget key for embeddable chat script ("wk_live_...")
+    widget_key: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    # Whitelisted domains allowed to host widget (e.g. ["example.com", "localhost:3000"])
+    allowed_domains: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb"), nullable=False
+    )
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
-    )
+    )
