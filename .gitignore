@@ -1,5 +1,40 @@
+# Environment & secrets
 .env
-.venv
-__pycache__
-.env
+*.env
+
+# Python virtual environment & cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+
+# Testing & linting caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local storage & data
 var/
+*.log
+
+# Node & Frontend dependencies & build outputs
+node_modules/
+**/node_modules/
+dist/
+widget/dist/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

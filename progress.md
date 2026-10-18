@@ -1,9 +1,9 @@
 # PROJECT PROGRESS TRACKER (progress.md)
 
-> **Last Updated**: 2026-10-18  
-> **Current Phase**: Phase 5 - Lead Capture & Qualification Pipeline  
-> **Status**: Ready to Start  
-> **Current File Context**: [`src/app/modules/chat/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/chat/)
+> **Last Updated**: 2026-10-19  
+> **Current Phase**: Step 13 / Phase 8 - Embeddable Web Chat Widget (Completed ✅)  
+> **Status**: Completed (Ready for Next Phase: Phase 5 Leads or Phase 7 Auth)  
+> **Current File Context**: [`widget/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/widget/)
 
 ---
 
@@ -15,7 +15,13 @@
   - Real-estate assistant prompt & context formatter with strict grounding.
   - Full REST and SSE token streaming endpoints verified via PowerShell & curl.
   - Test suite: 238 passing tests (`pytest`).
-- **Immediate Next Step**: Phase 5 - Lead Capture & Qualification Pipeline (`src/app/modules/leads/`).
+- **Phase 8 / Step 13 (Embeddable Web Chat Widget)**: 100% Complete (13.1 through 13.6).
+  - Public widget auth (`wk_live_...`, domain whitelisting, visitor JWT session isolation).
+  - Public conversation, history, and real-time SSE streaming endpoints with rate limiting.
+  - Shadow DOM TypeScript widget with unified dark theme tokens (`#0B0B0D`, orange `#F97316`).
+  - Safe Markdown parser, localStorage session persistence, auto-scroll, and typing indicator.
+  - Test embed demo page (`widget/index.html`) and unit test suite.
+- **Immediate Next Step**: Phase 5 — Lead Capture & CRM Qualification Pipeline (`src/app/modules/leads/`) OR Agency Auth & Dashboard UI (`src/app/modules/auth/`).
 
 ---
 
@@ -106,7 +112,38 @@
 
 ---
 
-### [ ] Phase 8: Embeddable Web Chat Widget (`widget/`)
-- [ ] Lightweight Vanilla JS/TS embeddable bundle
-- [ ] Streaming UI, Markdown rendering, auto-reconnect
-- [ ] Lead capture form integration
+### [x] Step 13 / Phase 8: Embeddable Web Chat Widget (`widget/`) (100% COMPLETE ✅)
+- [x] **13.1 Backend Public Widget Auth**:
+  - `widget_key` (public key `wk_live_...`) and `allowed_domains` for tenants.
+  - HTTP `Origin` header check for domain whitelisting.
+  - Visitor session token issuance to prevent visitors from viewing other visitors' conversations.
+- [x] **13.2 Public Widget Endpoints (`/api/v1/widget/...`)**:
+  - Reusing existing `ChatService` (conversations, messages, SSE streaming).
+  - Visitor conversation isolation via JSONB metadata filtering.
+  - Sliding-window rate limiting on public widget endpoints with Redis + in-memory fallback.
+- [x] **13.3 Widget Scaffold & Architecture**:
+  - `widget/` project setup with TypeScript + Vite.
+  - Shadow DOM encapsulation (to prevent host site CSS collisions).
+  - Single `<script>` embed bundle output (IIFE bundle target `widget.js`).
+- [x] **13.4 UI Components & Shared Design Tokens**:
+  - Floating launcher button with micro-animations.
+  - Chat window, header, message list, input box, typing indicators.
+  - Unified Design System Tokens (shared across Widget, Agency Admin & Super Admin):
+    - `--bg: #0B0B0D` (Dark charcoal background)
+    - `--surface: #151517`
+    - `--surface-2: #1E1E21`
+    - `--brown-glow: #3A1F10 -> #0B0B0D` (warm brown gradient for header)
+    - `--accent: #F97316` (Orange)
+    - `--accent-hover: #EA580C`
+    - `--text: #FFFFFF`
+    - `--muted: #A1A1AA`
+    - `--border: rgba(255, 255, 255, 0.08)`
+- [x] **13.5 Client Runtime & SSE Streaming**:
+  - Real-time SSE token-by-token stream reader.
+  - Visitor session & conversation ID persistence in `localStorage`.
+  - Auto-reconnect & Markdown formatting for assistant replies.
+- [x] **13.6 Test Embed Page & Verification**:
+  - Standalone luxury agency demo embed test page (`widget/index.html`).
+  - Unit test suite for public widget endpoints (`tests/unit/modules/widget/test_widget_endpoints.py`).
+
+
