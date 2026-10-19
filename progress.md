@@ -69,7 +69,48 @@
     - Wired `AgencyConversationsPage.tsx` to `GET /api/v1/chat/conversations` and message history `GET /api/v1/chat/conversations/{id}/messages`.
     - Integrated real-time SSE token-by-token streaming reader via `POST /api/v1/chat/conversations/{id}/stream`.
     - Added instant thread provisioning via `POST /api/v1/chat/conversations`.
-- **Immediate Next Step**: Step 7.6 (End-to-End Verification & Conventional Git Commit).
+- **Phase 12: Real-Time Human Handoff & Hybrid WebSocket Gateway (IN PROGRESS 🟡)**:
+  - [x] **Step 12b.1: Database Enums, Models & Alembic Migration**:
+    - Defined `ConversationStatus` (`ai`, `handoff_requested`, `human_active`, `resolved`) and `SenderType` (`visitor`, `ai`, `agent`, `system`) in `src/app/modules/chat/enums.py`.
+    - Added `status` (default `'ai'`, indexed), `assigned_agent_id` (FK to `users.id`), and `assigned_agent` relationship to `Conversation` model with composite index `ix_conversations_tenant_status`.
+    - Added `sender_type` (default `'visitor'`, indexed) and `agent_id` (FK to `users.id`) to `Message` model.
+    - Updated `ConversationRead`, `MessageRead`, and added `ConversationStatusUpdateRequest` and `ConversationSummaryResponse` in `schemas.py`.
+    - Updated `ChatRepository` and `ChatService` with backward-compatible defaults, status filtering, and `update_conversation_status`.
+    - Applied Alembic migration `4cecc086a386` to PostgreSQL.
+  - [x] **Step 12b.2: Distributed Redis Pub/Sub Connection Hub & Event Bus (`# 12b HITL`)**:
+    - Strongly typed Pydantic event envelope `WSEvent` with `WSEventType` (token, message, status_change, handoff_request, agent_claimed, agent_released, typing, ping, pong) in `src/app/modules/chat/events.py`.
+    - `RedisPubSubManager` in `src/app/modules/chat/redis_pubsub.py` providing multi-process Redis channel pub/sub isolation (`tenant:{id}:conv:{conv_id}` and `tenant:{id}:agent_alerts`).
+    - `ConnectionManager` in `src/app/modules/chat/connection_manager.py` with multi-socket client registration, Redis listener background tasks, and thread-safe broadcast dispatch.
+  - [x] **Step 12b.3: FastAPI Dual WebSocket Gateways (`# 12b HITL`)**:
+    - Multi-lingual intent detector (English, Arabic, Urdu/Hindi Roman) and guardrail reply generator in `src/app/modules/chat/handoff.py`.
+    - `/api/v1/chat/ws/agent`: Agency broker/agent endpoint (Agency JWT auth, claim, release, live agent reply).
+    - `/api/v1/chat/ws/{conversation_id}`: Visitor widget endpoint (Visitor token auth, live AI stream dispatch, handoff detection).
+    - Starlette routing precedence configured (static `/agent` before dynamic `/{conversation_id}`).
+  - [x] **Step 12b.4: Agent Claim, Release & Resolve REST Endpoints (`# 12b HITL`)**:
+    - `POST /api/v1/chat/conversations/{conversation_id}/claim`: Authenticates agency agent, assigns `assigned_agent_id`, sets status to `human_active`, adds system audit message, and broadcasts `STATUS_CHANGE` over Redis Pub/Sub.
+    - `POST /api/v1/chat/conversations/{conversation_id}/release`: Sets status to `ai`, clears `assigned_agent_id`, creates audit message, and broadcasts update.
+    - `POST /api/v1/chat/conversations/{conversation_id}/resolve`: Closes conversation with `resolved` status and notifies realtime listeners.
+    - Added eager reload & refresh pattern to prevent async SQLAlchemy greenlet expiry on serialization.
+  - [x] **Step 12b.5: Real-time AI Handover Summary Generator (`# 12b HITL`)**:
+    - `build_summary_messages()` prompt builder in `src/app/modules/chat/prompts.py` extracting structured JSON summary (intent, budget, preferred location).
+    - `GET /api/v1/chat/conversations/{conversation_id}/summary` in `router.py` & `service.py`: Generates instant 2-second executive brief for live brokers stepping into a visitor thread.
+    - Automated integration test `test_hitl_endpoints.py` passing 100%.
+  - [x] **Step 12b.6: Embeddable Widget WebSocket Shift (`# 12b HITL`)**:
+    - Created `WidgetWebSocketClient` in `widget/src/ws.ts` with auto-reconnection, 25s heartbeat pings, and strongly-typed frame dispatching.
+    - Extended `types.ts` with `sender_type` (`visitor`, `ai`, `agent`, `system`) and `status` (`ai`, `handoff_requested`, `human_active`, `resolved`).
+    - Added styles in `styles.ts` for `.re-msg-agent` (distinctive broker blue badge) and `.re-msg-system` (pill event announcements).
+    - Upgraded `main.ts` runtime to initiate WebSocket on conversation start, handle live AI token streams and incoming broker messages over a single connection, and fallback gracefully to HTTP SSE if WebSocket is blocked.
+    - Updated dynamic header status indicator (AI Assistant vs Connecting vs Live Advisor Connected vs Resolved).
+  - [x] **Step 12b.7: Dashboard Live Agent Inbox UI (`AgencyConversationsPage.tsx`) (`# 12b HITL`)**:
+    - Created `AgentWebSocketClient` in `dashboard/src/api/agentWs.ts` listening to tenant-wide Redis handoff alerts (`/api/v1/chat/ws/agent`), live visitor messages, and presence state.
+    - Updated `dashboard/src/types/agency.ts` and `dashboard/src/api/client.ts` with `claimConversation`, `releaseConversation`, `resolveConversation`, and `getConversationSummary`.
+    - Added status filter pills (All | 🚨 Handoffs | 👤 Live Advisor | 🤖 AI | Resolved).
+    - Added dismissable alert banner when any visitor triggers human handoff in real-time.
+    - Added 1-click **"Claim Conversation"**, **"Release to AI"**, and **"Mark Resolved"** action buttons.
+    - Added interactive **"⚡ AI Brief"** executive summary drawer rendering stated intent, budget, and location.
+    - Added live agent WebSocket reply input delivering broker messages directly to the visitor widget in real-time.
+    - Dashboard build passed (`npm run build` -> `485.9 kB`, 0 TS errors).
+- **Phase 12 (Real-Time Human Handoff & Hybrid WebSocket Gateway) Status**: 100% COMPLETE ✅!
 
 
 

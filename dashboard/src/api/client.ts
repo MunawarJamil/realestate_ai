@@ -51,6 +51,8 @@ export interface BackendConversation {
   id: string;
   tenant_id: string;
   title: string;
+  status: 'ai' | 'handoff_requested' | 'human_active' | 'resolved'; // # 12b HITL
+  assigned_agent_id?: string | null; // # 12b HITL
   metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -65,8 +67,18 @@ export interface BackendMessage {
   id: string;
   conversation_id: string;
   role: 'user' | 'assistant' | 'system';
+  sender_type?: 'visitor' | 'ai' | 'agent' | 'system'; // # 12b HITL
+  agent_id?: string | null; // # 12b HITL
   content: string;
   created_at: string;
+}
+
+export interface BackendConversationSummary {
+  conversation_id: string;
+  summary: string;
+  key_intent?: string | null;
+  budget?: string | null;
+  preferred_location?: string | null;
 }
 
 export interface UserRead {
@@ -344,6 +356,46 @@ export const apiClient = {
           method: 'POST',
           auth: 'agency',
           body: JSON.stringify({ content }),
+        }
+      );
+    },
+
+    // # 12b HITL - Agent Claim, Release, Resolve & AI Summary
+    async claimConversation(conversationId: string): Promise<BackendConversation> {
+      return request<BackendConversation>(
+        `/api/v1/chat/conversations/${conversationId}/claim`,
+        {
+          method: 'POST',
+          auth: 'agency',
+        }
+      );
+    },
+
+    async releaseConversation(conversationId: string): Promise<BackendConversation> {
+      return request<BackendConversation>(
+        `/api/v1/chat/conversations/${conversationId}/release`,
+        {
+          method: 'POST',
+          auth: 'agency',
+        }
+      );
+    },
+
+    async resolveConversation(conversationId: string): Promise<BackendConversation> {
+      return request<BackendConversation>(
+        `/api/v1/chat/conversations/${conversationId}/resolve`,
+        {
+          method: 'POST',
+          auth: 'agency',
+        }
+      );
+    },
+
+    async getConversationSummary(conversationId: string): Promise<BackendConversationSummary> {
+      return request<BackendConversationSummary>(
+        `/api/v1/chat/conversations/${conversationId}/summary`,
+        {
+          auth: 'agency',
         }
       );
     },

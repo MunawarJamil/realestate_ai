@@ -7,12 +7,16 @@ import { createWidgetContainer, WidgetElements } from './container';
 import { renderMarkdown } from './markdown';
 import { WidgetStorage } from './storage';
 import { ChatMessage, RealEstateAIWindowAPI, WidgetConfig, WidgetState } from './types';
+import { WidgetWebSocketClient } from './ws'; // # 12b HITL
 
 class RealEstateWidgetController {
   private config: WidgetConfig;
   private elements: WidgetElements | null = null;
   private storage: WidgetStorage;
   private api: WidgetApiClient;
+  private wsClient: WidgetWebSocketClient | null = null; // # 12b HITL
+  private activeStreamingBubble: HTMLDivElement | null = null; // # 12b HITL
+  private accumulatedStreamContent = ''; // # 12b HITL
   private state: WidgetState;
   private currentStreamController: AbortController | null = null;
 
@@ -24,6 +28,7 @@ class RealEstateWidgetController {
       isOpen: false,
       isLoading: false,
       isStreaming: false,
+      status: 'ai', // # 12b HITL
       session: null,
       conversationId: null,
       messages: [],
@@ -42,12 +47,14 @@ class RealEstateWidgetController {
     // Check for cached session in localStorage
     const cachedSession = this.storage.getSession();
     const cachedConvId = this.storage.getConversationId();
-    if (cachedSession) {
+    if (cachedSession && cachedConvId) {
       this.state.session = cachedSession;
       this.state.conversationId = cachedConvId;
       if (cachedSession.tenant_name && this.elements.headerTitle) {
         this.elements.headerTitle.textContent = cachedSession.tenant_name;
       }
+      // # 12b HITL - Eagerly establish WebSocket connection
+      this.initWebSocket();
     }
   }
 
@@ -100,10 +107,8 @@ class RealEstateWidgetController {
     this.elements.window.classList.add('re-open');
     this.elements.input.focus();
 
-    // If chat is empty, initialize session and load/greeting
-    if (this.state.messages.length === 0) {
-      await this.ensureSession();
-    }
+    // Ensure session is active, WS is connected, and past messages are rendered
+    await this.ensureSession();
   }
 
   public close(): void {
@@ -128,7 +133,12 @@ class RealEstateWidgetController {
    * Ensures a valid visitor session and conversation are ready
    */
   private async ensureSession(): Promise<boolean> {
+    // # 12b HITL - If session and conversationId are already in memory, ensure WS is connected and messages loaded
     if (this.state.session && this.state.conversationId) {
+      this.initWebSocket();
+      if (this.state.messages.length === 0) {
+        await this.loadMessagesHistory(this.state.session.visitor_token, this.state.conversationId);
+      }
       return true;
     }
 
@@ -159,26 +169,10 @@ class RealEstateWidgetController {
       this.state.conversationId = convId;
 
       // 3. Load past messages if any, or render initial greeting
-      const history = await this.api.listMessages(session.visitor_token, convId);
-      this.hideTypingIndicator();
+      await this.loadMessagesHistory(session.visitor_token, convId);
 
-      if (history.length > 0) {
-        for (const msg of history) {
-          this.appendMessage(msg, false);
-        }
-      } else {
-        const greeting =
-          this.config.greeting ||
-          `Hello! Welcome to ${session.tenant_name || 'our real estate agency'}. How can I assist you with properties or pricing today?`;
-        this.appendMessage(
-          {
-            id: 'greeting',
-            role: 'assistant',
-            content: greeting,
-          },
-          false
-        );
-      }
+      // # 12b HITL - Establish Real-time WebSocket Connection
+      this.initWebSocket();
 
       return true;
     } catch (err: unknown) {
@@ -187,6 +181,130 @@ class RealEstateWidgetController {
       const errMsg = err instanceof Error ? err.message : 'Unable to connect to assistant';
       this.appendErrorMessage(errMsg);
       return false;
+    }
+  }
+
+  // # 12b HITL - Load past messages history into widget
+  private async loadMessagesHistory(visitorToken: string, convId: string): Promise<void> {
+    this.hideTypingIndicator();
+    try {
+      const history = await this.api.listMessages(visitorToken, convId);
+      if (history.length > 0) {
+        for (const msg of history) {
+          if (!this.state.messages.some((m) => m.id === msg.id)) {
+            this.appendMessage(msg, true);
+          }
+        }
+      } else {
+        const greeting =
+          this.config.greeting ||
+          `Hello! Welcome to ${this.state.session?.tenant_name || 'our real estate agency'}. How can I assist you with properties or pricing today?`;
+        this.appendMessage(
+          {
+            id: 'greeting',
+            role: 'assistant',
+            sender_type: 'ai',
+            content: greeting,
+          },
+          true
+        );
+      }
+    } catch (err) {
+      console.warn('[RealEstateAI Widget] Failed to load messages history:', err);
+    }
+  }
+
+  // # 12b HITL - Dual-Engine Real-time WebSocket Gateway
+  private initWebSocket(): void {
+    if (!this.state.session || !this.state.conversationId) return;
+    if (this.wsClient && this.wsClient.isConnected()) return;
+
+    if (this.wsClient) {
+      this.wsClient.disconnect();
+    }
+
+    this.wsClient = new WidgetWebSocketClient(
+      this.config.apiUrl,
+      this.state.session.visitor_token,
+      this.state.conversationId,
+      {
+        onToken: (chunk: string) => {
+          if (!this.activeStreamingBubble) {
+            this.hideTypingIndicator();
+            this.activeStreamingBubble = this.createMessageBubble('assistant');
+          }
+          this.accumulatedStreamContent += chunk;
+          this.activeStreamingBubble.innerHTML = renderMarkdown(this.accumulatedStreamContent);
+          this.scrollToBottom();
+        },
+        onMessage: (msg: ChatMessage) => {
+          this.hideTypingIndicator();
+          this.state.isStreaming = false;
+          if (this.elements) {
+            this.elements.sendBtn.disabled = this.elements.input.value.trim().length === 0;
+            this.elements.input.focus();
+          }
+
+          // If completing AI streaming chunk collection
+          if (msg.role === 'assistant' && this.activeStreamingBubble) {
+            this.state.messages.push({
+              ...msg,
+              content: this.accumulatedStreamContent || msg.content,
+            });
+            this.activeStreamingBubble = null;
+            this.accumulatedStreamContent = '';
+            return;
+          }
+
+          // Avoid duplicate user message rendering
+          if (msg.role === 'user') {
+            return;
+          }
+
+          // Avoid duplicate message rendering if already in state
+          if (this.state.messages.some((m) => m.id === msg.id)) {
+            return;
+          }
+
+          this.appendMessage(msg, true);
+        },
+        onStatusChange: (status: 'ai' | 'handoff_requested' | 'human_active' | 'resolved') => {
+          this.updateStatusBadge(status);
+        },
+        onError: (err: Error) => {
+          console.warn('[RealEstateAI Widget] Real-time WS notice:', err);
+        },
+      }
+    );
+
+    this.wsClient.connect();
+  }
+
+  // # 12b HITL - Header Live Status Badge
+  private updateStatusBadge(status: 'ai' | 'handoff_requested' | 'human_active' | 'resolved'): void {
+    if (!this.elements) return;
+    this.state.status = status;
+
+    if (status === 'human_active') {
+      this.elements.headerSubtitle.innerHTML = `
+        <span class="re-online-indicator" style="background:#3B82F6;box-shadow:0 0 8px rgba(59,130,246,0.6);"></span>
+        Live Property Advisor • Connected
+      `;
+    } else if (status === 'handoff_requested') {
+      this.elements.headerSubtitle.innerHTML = `
+        <span class="re-online-indicator" style="background:#EAB308;box-shadow:0 0 8px rgba(234,179,8,0.6);"></span>
+        Connecting to Advisor...
+      `;
+    } else if (status === 'resolved') {
+      this.elements.headerSubtitle.innerHTML = `
+        <span class="re-online-indicator" style="background:#6B7280;"></span>
+        Inquiry Resolved
+      `;
+    } else {
+      this.elements.headerSubtitle.innerHTML = `
+        <span class="re-online-indicator"></span>
+        ${this.config.subtitle || 'Online • Instant Answers'}
+      `;
     }
   }
 
@@ -214,6 +332,7 @@ class RealEstateWidgetController {
     const userMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
       role: 'user',
+      sender_type: 'visitor',
       content: text,
     };
     this.appendMessage(userMsg, true);
@@ -221,7 +340,27 @@ class RealEstateWidgetController {
     // Prepare assistant message bubble
     this.state.isStreaming = true;
     this.showTypingIndicator();
+    this.activeStreamingBubble = null;
+    this.accumulatedStreamContent = '';
 
+    // # 12b HITL - Prefer Real-time WebSocket connection
+    if (this.wsClient && this.wsClient.isConnected()) {
+      const dispatched = this.wsClient.sendMessage(text);
+      if (dispatched) {
+        // When chatting with a live advisor or waiting in queue, do not display AI streaming typing indicator
+        if (this.state.status === 'human_active' || this.state.status === 'handoff_requested') {
+          this.hideTypingIndicator();
+          this.state.isStreaming = false;
+          if (this.elements) {
+            this.elements.sendBtn.disabled = this.elements.input.value.trim().length === 0;
+            this.elements.input.focus();
+          }
+        }
+        return;
+      }
+    }
+
+    // Fallback to HTTP SSE Stream
     let assistantBubble: HTMLDivElement | null = null;
     let accumulatedContent = '';
 
@@ -254,6 +393,7 @@ class RealEstateWidgetController {
           this.state.messages.push({
             id: `ast_${Date.now()}`,
             role: 'assistant',
+            sender_type: 'ai',
             content: accumulatedContent,
           });
         }
@@ -277,15 +417,32 @@ class RealEstateWidgetController {
     if (pushToState) {
       this.state.messages.push(msg);
     }
-    const bubble = this.createMessageBubble(msg.role);
-    bubble.innerHTML =
-      msg.role === 'assistant' ? renderMarkdown(msg.content) : this.escapeText(msg.content);
+    const bubble = this.createMessageBubble(msg.role, msg.sender_type);
+    if (msg.sender_type === 'agent') {
+      bubble.innerHTML = `
+        <div style="font-size:11px;font-weight:600;color:#60A5FA;margin-bottom:4px;display:flex;align-items:center;gap:4px;">
+          <span>👤</span> Licensed Property Advisor
+        </div>
+        <div>${renderMarkdown(msg.content)}</div>
+      `;
+    } else if (msg.sender_type === 'system' || msg.role === 'system') {
+      bubble.textContent = msg.content;
+    } else {
+      bubble.innerHTML =
+        msg.role === 'assistant' ? renderMarkdown(msg.content) : this.escapeText(msg.content);
+    }
     this.scrollToBottom();
   }
 
-  private createMessageBubble(role: 'user' | 'assistant' | 'system'): HTMLDivElement {
+  private createMessageBubble(role: 'user' | 'assistant' | 'system', senderType?: string): HTMLDivElement {
     const bubble = document.createElement('div');
-    bubble.className = `re-msg re-msg-${role}`;
+    if (senderType === 'agent') {
+      bubble.className = 're-msg re-msg-agent';
+    } else if (senderType === 'system' || role === 'system') {
+      bubble.className = 're-msg re-msg-system';
+    } else {
+      bubble.className = `re-msg re-msg-${role}`;
+    }
     this.elements?.messagesContainer.appendChild(bubble);
     return bubble;
   }

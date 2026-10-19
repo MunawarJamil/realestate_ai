@@ -1,14 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search,
-  Flame,
   CheckCircle2,
-  Clock,
   Send,
   MapPin,
   Phone,
-  FileCheck,
-  Calendar,
   Sparkles,
   Bot,
   User,
@@ -17,12 +13,14 @@ import {
   Plus,
   AlertCircle,
   MessageSquare,
+  UserCheck,
+  Radio,
 } from 'lucide-react';
-import type { Conversation, ConversationStatus, Message } from '../../types/agency';
+import type { Conversation, ConversationStatus, Message, BackendConversationSummary } from '../../types/agency';
 import type { BackendConversation, BackendMessage } from '../../api/client';
-import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { apiClient, ApiError } from '../../api/client';
+import { AgentWebSocketClient } from '../../api/agentWs'; // # 12b HITL
 
 function mapBackendConversation(
   conv: BackendConversation,
@@ -40,7 +38,8 @@ function mapBackendConversation(
     intent: (meta.intent as string) || 'Property Inquiry',
     budget: (meta.budget as string) || 'AED 2M - 5M',
     property_interest: (meta.property_interest as string) || conv.title || 'Luxury Inquiry',
-    status: (meta.status as ConversationStatus) || 'active',
+    status: (conv.status as ConversationStatus) || 'ai', // # 12b HITL
+    assigned_agent_id: conv.assigned_agent_id, // # 12b HITL
     started_at: new Date(conv.created_at).toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
@@ -57,7 +56,8 @@ function mapBackendConversation(
 function mapBackendMessage(msg: BackendMessage): Message {
   return {
     id: msg.id,
-    role: msg.role === 'user' ? 'user' : 'assistant',
+    role: msg.role === 'user' ? 'user' : msg.role === 'system' ? 'system' : 'assistant',
+    sender_type: msg.sender_type, // # 12b HITL
     content: msg.content,
     created_at: new Date(msg.created_at).toLocaleTimeString([], {
       hour: '2-digit',
@@ -79,6 +79,14 @@ export const AgencyConversationsPage: React.FC = () => {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [showMobileList, setShowMobileList] = useState(false);
 
+  // # 12b HITL - Real-time Agent WebSocket & AI Summary States
+  const [activeSummary, setActiveSummary] = useState<BackendConversationSummary | null>(null);
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  const [showSummaryDrawer, setShowSummaryDrawer] = useState(false);
+  const [agentWsConnected, setAgentWsConnected] = useState(false);
+  const [liveHandoffAlert, setLiveHandoffAlert] = useState<{ conversation_id: string; snippet: string } | null>(null);
+  const agentWsRef = useRef<AgentWebSocketClient | null>(null);
+
   // Real-time SSE streaming state
   const [isStreaming, setIsStreaming] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -90,7 +98,7 @@ export const AgencyConversationsPage: React.FC = () => {
 
   const showNotification = (msg: string) => {
     setActionNotice(msg);
-    setTimeout(() => setActionNotice(null), 2500);
+    setTimeout(() => setActionNotice(null), 3500);
   };
 
   // 1. Fetch Conversations List
@@ -121,6 +129,67 @@ export const AgencyConversationsPage: React.FC = () => {
     fetchConversations();
   }, [fetchConversations]);
 
+  // # 12b HITL - Connect Agency Agent WebSocket for real-time handoff alerts & live broker messages
+  useEffect(() => {
+    const ws = new AgentWebSocketClient({
+      onConnected: () => {
+        setAgentWsConnected(true);
+      },
+      onDisconnected: () => {
+        setAgentWsConnected(false);
+      },
+      onHandoffAlert: (alert) => {
+        setLiveHandoffAlert({
+          conversation_id: alert.conversation_id,
+          snippet: alert.snippet,
+        });
+        showNotification(`🚨 Live Visitor Alert: ${alert.snippet}`);
+        fetchConversations();
+      },
+      onStatusChange: (data) => {
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === data.conversation_id
+              ? {
+                  ...c,
+                  status: data.status as ConversationStatus,
+                  assigned_agent_id: data.assigned_agent_id,
+                }
+              : c
+          )
+        );
+      },
+      onMessage: (msg) => {
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id === msg.conversation_id) {
+              const mapped = mapBackendMessage(msg);
+              const exists = c.messages.some((m) => m.id === msg.id);
+              if (exists) return c;
+              return {
+                ...c,
+                last_message_at: mapped.created_at,
+                messages: [...c.messages, mapped],
+              };
+            }
+            return c;
+          })
+        );
+        setTimeout(scrollToBottom, 60);
+      },
+      onError: (err) => {
+        console.warn('[RealEstateAI Agent WS] Notice:', err);
+      },
+    });
+
+    ws.connect();
+    agentWsRef.current = ws;
+
+    return () => {
+      ws.disconnect();
+    };
+  }, [fetchConversations]);
+
   // 2. Fetch Messages for Selected Conversation
   const loadMessages = useCallback(async (convId: string) => {
     setIsLoadingMessages(true);
@@ -142,6 +211,9 @@ export const AgencyConversationsPage: React.FC = () => {
   useEffect(() => {
     if (selectedId) {
       loadMessages(selectedId);
+      // Reset summary drawer when switching conversations
+      setActiveSummary(null);
+      setShowSummaryDrawer(false);
     }
   }, [selectedId, loadMessages]);
 
@@ -156,6 +228,69 @@ export const AgencyConversationsPage: React.FC = () => {
     return matchesSearch && matchesFilter;
   });
 
+  // # 12b HITL - Claim Conversation (Human Takeover)
+  const handleClaimConversation = async () => {
+    if (!selectedConv) return;
+    try {
+      await apiClient.agency.claimConversation(selectedConv.id);
+      setConversations((prev) =>
+        prev.map((c) => (c.id === selectedConv.id ? { ...c, status: 'human_active' } : c))
+      );
+      showNotification('You have taken live ownership of this conversation.');
+      loadMessages(selectedConv.id);
+    } catch (err: unknown) {
+      const msg = err instanceof ApiError ? err.message : 'Claim failed';
+      alert(`Error claiming conversation: ${msg}`);
+    }
+  };
+
+  // # 12b HITL - Release Conversation Back to AI
+  const handleReleaseConversation = async () => {
+    if (!selectedConv) return;
+    try {
+      await apiClient.agency.releaseConversation(selectedConv.id);
+      setConversations((prev) =>
+        prev.map((c) => (c.id === selectedConv.id ? { ...c, status: 'ai', assigned_agent_id: null } : c))
+      );
+      showNotification('Conversation returned to AI Assistant.');
+      loadMessages(selectedConv.id);
+    } catch (err: unknown) {
+      const msg = err instanceof ApiError ? err.message : 'Release failed';
+      alert(`Error releasing conversation: ${msg}`);
+    }
+  };
+
+  // # 12b HITL - Mark Conversation Resolved
+  const handleResolveConversation = async () => {
+    if (!selectedConv) return;
+    try {
+      await apiClient.agency.resolveConversation(selectedConv.id);
+      setConversations((prev) =>
+        prev.map((c) => (c.id === selectedConv.id ? { ...c, status: 'resolved' } : c))
+      );
+      showNotification('Conversation marked as resolved.');
+    } catch (err: unknown) {
+      const msg = err instanceof ApiError ? err.message : 'Resolve failed';
+      alert(`Error resolving conversation: ${msg}`);
+    }
+  };
+
+  // # 12b HITL - Fetch Real-time AI Context Summary
+  const handleFetchSummary = async () => {
+    if (!selectedConv) return;
+    setIsLoadingSummary(true);
+    setShowSummaryDrawer(true);
+    try {
+      const res = await apiClient.agency.getConversationSummary(selectedConv.id);
+      setActiveSummary(res);
+    } catch (err: unknown) {
+      console.error('Summary fetch error:', err);
+      showNotification('AI context summary currently unavailable.');
+    } finally {
+      setIsLoadingSummary(false);
+    }
+  };
+
   // 3. Create a New Conversation Inquiry
   const handleCreateNewConversation = async () => {
     try {
@@ -167,7 +302,7 @@ export const AgencyConversationsPage: React.FC = () => {
           intent: 'Investment / Purchase',
           budget: 'AED 8,500,000',
           property_interest: 'Palm Jumeirah Signature Villa',
-          status: 'active',
+          status: 'ai',
           tags: ['Dashboard Test'],
         },
       });
@@ -182,7 +317,7 @@ export const AgencyConversationsPage: React.FC = () => {
     }
   };
 
-  // 4. Send Message with Real-Time SSE Token Streaming
+  // 4. Send Message (Live Human Agent or AI Stream Test)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!replyText.trim() || !selectedConv || isStreaming) return;
@@ -190,12 +325,54 @@ export const AgencyConversationsPage: React.FC = () => {
     const messageContent = replyText.trim();
     setReplyText('');
 
-    const tempUserMsgId = `usr-${Date.now()}`;
-    const tempAssistantMsgId = `ast-${Date.now()}`;
     const timestampStr = new Date().toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
     });
+
+    // # 12b HITL - If in Human Active mode, send live broker message
+    if (selectedConv.status === 'human_active') {
+      const tempAgentMsgId = `agt-${Date.now()}`;
+      const agentMsg: Message = {
+        id: tempAgentMsgId,
+        role: 'user', // UI right alignment
+        sender_type: 'agent',
+        content: messageContent,
+        created_at: timestampStr,
+      };
+
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === selectedConv.id
+            ? {
+                ...c,
+                last_message_at: timestampStr,
+                messages: [...c.messages, agentMsg],
+              }
+            : c
+        )
+      );
+      setTimeout(scrollToBottom, 40);
+
+      // Prefer WebSocket dispatch
+      if (agentWsRef.current?.isConnected()) {
+        const ok = agentWsRef.current.sendMessage(selectedConv.id, messageContent);
+        if (ok) return;
+      }
+
+      // Fallback to REST
+      try {
+        await apiClient.agency.sendMessage(selectedConv.id, messageContent);
+      } catch (err: unknown) {
+        console.error('Failed to send agent message:', err);
+        showNotification('Failed to deliver message to visitor.');
+      }
+      return;
+    }
+
+    // Otherwise, simulate/test AI assistant streaming reply
+    const tempUserMsgId = `usr-${Date.now()}`;
+    const tempAssistantMsgId = `ast-${Date.now()}`;
 
     const userMessage: Message = {
       id: tempUserMsgId,
@@ -297,6 +474,35 @@ export const AgencyConversationsPage: React.FC = () => {
         </div>
       )}
 
+      {/* # 12b HITL - Live Handoff Alert Banner */}
+      {liveHandoffAlert && (
+        <div className="p-3 bg-amber-500/15 border border-amber-500/40 rounded-xl text-amber-300 text-xs flex items-center justify-between gap-3 animate-pulse shrink-0">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              <strong>Live Visitor Handoff Requested:</strong> "{liveHandoffAlert.snippet}"
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setSelectedId(liveHandoffAlert.conversation_id);
+                setLiveHandoffAlert(null);
+              }}
+              className="px-2.5 py-1 bg-amber-500 text-black font-semibold rounded-lg text-xs hover:bg-amber-400 cursor-pointer"
+            >
+              Take Over
+            </button>
+            <button
+              onClick={() => setLiveHandoffAlert(null)}
+              className="text-zinc-400 hover:text-white px-1 text-xs cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Backend Error Alert */}
       {errorBanner && (
         <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-xs flex items-center justify-between gap-2 shrink-0">
@@ -321,9 +527,18 @@ export const AgencyConversationsPage: React.FC = () => {
           {/* Search, Action & Filter Header */}
           <div className="p-3 sm:p-3.5 border-b border-white/8 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-white uppercase tracking-wider">
-                Live Inquiries
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-white uppercase tracking-wider">
+                  Inquiries
+                </span>
+                <span
+                  title={agentWsConnected ? 'Agent Real-time Gateway Connected' : 'Connecting to Real-time Gateway...'}
+                  className="text-[10px] text-zinc-500 flex items-center gap-1 font-mono"
+                >
+                  <Radio className={`w-3 h-3 ${agentWsConnected ? 'text-emerald-400 animate-pulse' : 'text-zinc-600'}`} />
+                  {agentWsConnected ? 'Live' : 'Off'}
+                </span>
+              </div>
               <div className="flex items-center gap-1">
                 <button
                   onClick={fetchConversations}
@@ -354,18 +569,25 @@ export const AgencyConversationsPage: React.FC = () => {
               />
             </div>
 
+            {/* # 12b HITL - Status Filter Pills */}
             <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
-              {(['all', 'qualified_lead', 'active'] as const).map((status) => (
+              {[
+                { id: 'all', label: 'All' },
+                { id: 'handoff_requested', label: '🚨 Handoffs' },
+                { id: 'human_active', label: '👤 Live' },
+                { id: 'ai', label: '🤖 AI' },
+                { id: 'resolved', label: 'Resolved' },
+              ].map(({ id, label }) => (
                 <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-medium capitalize transition-colors cursor-pointer shrink-0 ${
-                    statusFilter === status
+                  key={id}
+                  onClick={() => setStatusFilter(id as any)}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer shrink-0 ${
+                    statusFilter === id
                       ? 'bg-white/10 text-white font-semibold'
                       : 'text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
-                  {status === 'qualified_lead' ? 'Qualified' : status}
+                  {label}
                 </button>
               ))}
             </div>
@@ -422,7 +644,7 @@ export const AgencyConversationsPage: React.FC = () => {
                     <p className="text-[11px] text-zinc-400 truncate mb-1.5">
                       {lastMsg ? (
                         <>
-                          {lastMsg.role === 'assistant' ? 'AI: ' : ''}
+                          {lastMsg.sender_type === 'agent' ? 'You: ' : lastMsg.role === 'assistant' ? 'AI: ' : ''}
                           {lastMsg.content}
                         </>
                       ) : (
@@ -434,15 +656,25 @@ export const AgencyConversationsPage: React.FC = () => {
                       <span className="font-mono text-zinc-400 bg-[#0B0B0D] px-1.5 py-0.5 rounded border border-white/5 truncate max-w-[110px]">
                         {conv.budget}
                       </span>
-                      {conv.status === 'qualified_lead' ? (
-                        <span className="text-rose-400 flex items-center gap-1 font-medium shrink-0">
-                          <Flame className="w-3 h-3" />
-                          Qualified
+                      {conv.status === 'handoff_requested' ? (
+                        <span className="text-amber-400 flex items-center gap-1 font-semibold shrink-0 animate-pulse">
+                          <AlertCircle className="w-3 h-3" />
+                          Handoff
+                        </span>
+                      ) : conv.status === 'human_active' ? (
+                        <span className="text-blue-400 flex items-center gap-1 font-semibold shrink-0">
+                          <UserCheck className="w-3 h-3" />
+                          Advisor
+                        </span>
+                      ) : conv.status === 'resolved' ? (
+                        <span className="text-zinc-500 flex items-center gap-1 font-medium shrink-0">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Resolved
                         </span>
                       ) : (
                         <span className="text-emerald-400 flex items-center gap-1 font-medium shrink-0">
-                          <Clock className="w-3 h-3" />
-                          Active
+                          <Bot className="w-3 h-3" />
+                          AI Active
                         </span>
                       )}
                     </div>
@@ -460,7 +692,7 @@ export const AgencyConversationsPage: React.FC = () => {
               showMobileList ? 'hidden' : 'flex'
             } md:flex flex-1 flex-col min-w-0 bg-[#151517] h-full`}
           >
-            {/* Header with Mobile Back Button */}
+            {/* Header with Mobile Back Button & # 12b HITL Status Actions */}
             <div className="p-3.5 sm:p-4 border-b border-white/8 bg-[#121215] flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
               <div className="flex items-center gap-3">
                 {/* Mobile Back Button */}
@@ -480,16 +712,23 @@ export const AgencyConversationsPage: React.FC = () => {
                     <h3 className="font-semibold text-xs sm:text-sm text-white truncate">
                       {selectedConv.visitor_name}
                     </h3>
-                    <Badge
-                      variant={
-                        selectedConv.status === 'qualified_lead' ? 'brand' : 'neutral'
-                      }
-                      size="sm"
-                    >
-                      {selectedConv.status === 'qualified_lead'
-                        ? 'High-Intent'
-                        : 'Active Inquiry'}
-                    </Badge>
+                    {selectedConv.status === 'handoff_requested' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1 animate-pulse">
+                        <AlertCircle className="w-3 h-3" /> Handoff Requested
+                      </span>
+                    ) : selectedConv.status === 'human_active' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1">
+                        <UserCheck className="w-3 h-3" /> Live Advisor Active
+                      </span>
+                    ) : selectedConv.status === 'resolved' ? (
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-zinc-700/30 text-zinc-400 border border-zinc-700/40">
+                        Resolved
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                        <Bot className="w-3 h-3" /> AI Assistant Active
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 text-[11px] sm:text-xs text-zinc-400 mt-0.5 flex-wrap">
                     <span className="flex items-center gap-1">
@@ -506,30 +745,112 @@ export const AgencyConversationsPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Quick Actions */}
-              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+              {/* # 12b HITL - Action Buttons: AI Brief, Claim, Release & Resolve */}
+              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0 flex-wrap">
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => showNotification('Viewing scheduled for Thursday 3:00 PM!')}
+                  onClick={handleFetchSummary}
+                  title="Generate concise AI Context Brief"
                 >
-                  <Calendar className="w-3.5 h-3.5 mr-1 text-[#F97316]" />
-                  <span>Viewing</span>
+                  <Sparkles className="w-3.5 h-3.5 mr-1 text-amber-400" />
+                  <span>{isLoadingSummary ? 'Analyzing...' : 'AI Brief'}</span>
                 </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() =>
-                    showNotification(
-                      `CRM lead captured for ${selectedConv.visitor_name}!`
-                    )
-                  }
-                >
-                  <FileCheck className="w-3.5 h-3.5 mr-1" />
-                  <span>Sync CRM</span>
-                </Button>
+
+                {selectedConv.status === 'handoff_requested' ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleClaimConversation}
+                    className="bg-amber-600 hover:bg-amber-500 text-white font-semibold animate-pulse shadow-lg shadow-amber-600/30"
+                  >
+                    <AlertCircle className="w-3.5 h-3.5 mr-1" />
+                    <span>Claim Conversation</span>
+                  </Button>
+                ) : selectedConv.status === 'human_active' ? (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleReleaseConversation}
+                      title="Return thread to AI Assistant"
+                    >
+                      <Bot className="w-3.5 h-3.5 mr-1 text-emerald-400" />
+                      <span>Release to AI</span>
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleResolveConversation}
+                      title="Mark inquiry as resolved"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-blue-400" />
+                      <span>Resolve</span>
+                    </Button>
+                  </>
+                ) : selectedConv.status === 'resolved' ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleClaimConversation}
+                    title="Re-open conversation"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 mr-1 text-zinc-400" />
+                    <span>Re-open</span>
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleClaimConversation}
+                    title="Take over conversation live from AI"
+                  >
+                    <User className="w-3.5 h-3.5 mr-1 text-blue-400" />
+                    <span>Take Over</span>
+                  </Button>
+                )}
               </div>
             </div>
+
+            {/* # 12b HITL - AI Executive Brief Drawer */}
+            {showSummaryDrawer && (
+              <div className="mx-4 sm:mx-6 mt-4 p-4 rounded-xl bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent border border-amber-500/30 relative animate-in fade-in">
+                <div className="flex items-start justify-between gap-2 mb-1.5">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-400">
+                    <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>AI Executive Handover Brief</span>
+                  </div>
+                  <button
+                    onClick={() => setShowSummaryDrawer(false)}
+                    className="text-zinc-400 hover:text-white text-xs px-1 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <p className="text-xs text-zinc-200 leading-relaxed mb-3">
+                  {isLoadingSummary ? 'Analyzing visitor dialogue with LLM...' : activeSummary?.summary || 'Inquiry underway. Ready for advisor.'}
+                </p>
+                {activeSummary && (
+                  <div className="flex items-center gap-3 text-[11px] text-zinc-400 flex-wrap">
+                    {activeSummary.key_intent && (
+                      <span className="bg-black/40 px-2 py-0.5 rounded border border-white/5">
+                        🎯 <strong className="text-zinc-300">Intent:</strong> {activeSummary.key_intent}
+                      </span>
+                    )}
+                    {activeSummary.budget && (
+                      <span className="bg-black/40 px-2 py-0.5 rounded border border-white/5">
+                        💰 <strong className="text-zinc-300">Budget:</strong> {activeSummary.budget}
+                      </span>
+                    )}
+                    {activeSummary.preferred_location && (
+                      <span className="bg-black/40 px-2 py-0.5 rounded border border-white/5">
+                        📍 <strong className="text-zinc-300">Location:</strong> {activeSummary.preferred_location}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Message Stream */}
             <div className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-4 pb-6 overscroll-contain">
@@ -543,22 +864,41 @@ export const AgencyConversationsPage: React.FC = () => {
                   <Bot className="w-8 h-8 text-zinc-600 mx-auto" />
                   <p>No messages in this inquiry thread yet.</p>
                   <p className="text-[11px] text-zinc-600">
-                    Send a test prompt below to initiate real-time AI response streaming.
+                    Send a message below to interact with this conversation.
                   </p>
                 </div>
               ) : (
                 selectedConv.messages.map((msg) => {
                   const isAssistant = msg.role === 'assistant';
+                  const isAgent = msg.sender_type === 'agent';
+                  const isSystem = msg.role === 'system' || msg.sender_type === 'system';
+
+                  // System Event Pill
+                  if (isSystem) {
+                    return (
+                      <div key={msg.id} className="flex justify-center my-2">
+                        <span className="text-[11px] text-zinc-400 bg-white/5 border border-white/10 px-3 py-1 rounded-full text-center">
+                          ℹ️ {msg.content}
+                        </span>
+                      </div>
+                    );
+                  }
 
                   return (
                     <div
                       key={msg.id}
                       className={`flex flex-col ${
-                        isAssistant ? 'items-start' : 'items-end'
+                        isAgent ? 'items-end' : isAssistant ? 'items-start' : 'items-start'
                       }`}
                     >
                       <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-zinc-500 mb-1 px-1">
-                        {isAssistant ? (
+                        {isAgent ? (
+                          <>
+                            <span className="font-semibold text-blue-400 flex items-center gap-1">
+                              <UserCheck className="w-3 h-3" /> Licensed Advisor (You)
+                            </span>
+                          </>
+                        ) : isAssistant ? (
                           <>
                             <Bot className="w-3 h-3 text-[#F97316]" />
                             <span className="font-semibold text-zinc-300">
@@ -567,10 +907,10 @@ export const AgencyConversationsPage: React.FC = () => {
                           </>
                         ) : (
                           <>
+                            <User className="w-3 h-3 text-amber-400" />
                             <span className="font-semibold text-zinc-300">
                               {selectedConv.visitor_name}
                             </span>
-                            <User className="w-3 h-3 text-zinc-500" />
                           </>
                         )}
                         <span>•</span>
@@ -579,19 +919,21 @@ export const AgencyConversationsPage: React.FC = () => {
 
                       <div
                         className={`max-w-[88%] sm:max-w-2xl p-3.5 sm:p-4 rounded-2xl text-xs sm:text-[13px] leading-relaxed ${
-                          isAssistant
+                          isAgent
+                            ? 'bg-[#131E30] text-zinc-100 border border-blue-500/40 rounded-tr-sm shadow-md shadow-blue-500/10'
+                            : isAssistant
                             ? 'bg-[#1E1E21] text-zinc-100 border border-white/8 rounded-tl-sm'
-                            : 'bg-[#F97316] text-white rounded-tr-sm shadow-md shadow-[#F97316]/20'
+                            : 'bg-[#2A1D15] text-zinc-100 border border-[#F97316]/30 rounded-tl-sm shadow-sm'
                         }`}
                       >
                         {msg.content ? (
                           <p className="whitespace-pre-wrap">{msg.content}</p>
-                        ) : (
+                        ) : isAssistant && isStreaming ? (
                           <div className="flex items-center gap-1.5 text-zinc-400 italic">
                             <Sparkles className="w-3.5 h-3.5 text-[#F97316] animate-spin" />
                             <span>Streaming assistant response...</span>
                           </div>
-                        )}
+                        ) : null}
 
                         {/* Grounded Citation */}
                         {isAssistant && msg.grounded_sources && msg.grounded_sources.length > 0 && (
@@ -631,9 +973,11 @@ export const AgencyConversationsPage: React.FC = () => {
                 onChange={(e) => setReplyText(e.target.value)}
                 disabled={isStreaming}
                 placeholder={
-                  isStreaming
+                  selectedConv.status === 'human_active'
+                    ? 'Type a message to reply live to the visitor (WebSocket)...'
+                    : isStreaming
                     ? 'AI assistant is streaming reply...'
-                    : 'Type a message to test conversational AI stream...'
+                    : 'Type a prompt to test conversational AI stream...'
                 }
                 className="flex-1 px-3.5 py-2 sm:py-2.5 bg-[#0B0B0D] border border-white/10 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#F97316] disabled:opacity-50"
               />
@@ -643,7 +987,13 @@ export const AgencyConversationsPage: React.FC = () => {
                 ) : (
                   <Send className="w-3.5 h-3.5 mr-1" />
                 )}
-                <span>{isStreaming ? 'Streaming...' : 'Send'}</span>
+                <span>
+                  {isStreaming
+                    ? 'Streaming...'
+                    : selectedConv.status === 'human_active'
+                    ? 'Reply to Visitor'
+                    : 'Send'}
+                </span>
               </Button>
             </form>
           </div>
