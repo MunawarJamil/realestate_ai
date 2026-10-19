@@ -1,11 +1,16 @@
 import secrets
 import uuid
 
+import jwt
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
+from app.core.security import AUDIENCE_PLATFORM, decode_user_token
 from app.db.session import get_session
+from app.modules.auth.models import UserRole
+from app.modules.auth.repository import UserRepository
 from app.modules.tenants.dependencies import get_current_tenant
 from app.modules.tenants.exceptions import TenantSlugTakenError
 from app.modules.tenants.models import Tenant
@@ -18,13 +23,33 @@ from app.modules.tenants.schemas import (
 )
 from app.modules.tenants.service import TenantService
 
+_bearer_auth = HTTPBearer(auto_error=False)
+
 
 async def require_admin(
-    x_admin_key: str = Header(...),
+    x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+    auth: HTTPAuthorizationCredentials | None = Depends(_bearer_auth),
     settings: Settings = Depends(get_settings),
 ) -> None:
-    if not secrets.compare_digest(x_admin_key, settings.admin_api_key):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid admin key")
+    # 1. Allow X-Admin-Key header (internal scripts / automation)
+    if x_admin_key and secrets.compare_digest(x_admin_key, settings.admin_api_key):
+        return
+
+    # 2. Allow Platform Super Admin JWT Bearer token
+    if auth and auth.credentials:
+        try:
+            payload = decode_user_token(
+                token=auth.credentials,
+                secret_key=settings.secret_key.get_secret_value(),
+                expected_audience=AUDIENCE_PLATFORM,
+                expected_type="access",
+            )
+            if payload.get("role") == UserRole.SUPER_ADMIN.value:
+                return
+        except (jwt.PyJWTError, ValueError):
+            pass
+
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Invalid admin key or platform token")
 
 
 router = APIRouter(prefix="/tenants", tags=["tenants"], dependencies=[Depends(require_admin)])
@@ -72,12 +97,18 @@ async def update_tenant(
 async def create_tenant(
     payload: TenantCreate, session: AsyncSession = Depends(get_session)
 ) -> TenantCreated:
-    service = TenantService(TenantRepository(session))
+    service = TenantService(
+        repo=TenantRepository(session),
+        user_repo=UserRepository(session),
+    )
     try:
         result = await service.create_tenant(
             name=payload.name,
             slug=payload.slug,
             allowed_domains=payload.allowed_domains,
+            admin_email=payload.admin_email,
+            admin_full_name=payload.admin_full_name,
+            admin_password=payload.admin_password,
         )
         await session.commit()
     except TenantSlugTakenError as err:
@@ -86,4 +117,6 @@ async def create_tenant(
     return TenantCreated(
         **TenantRead.model_validate(result.tenant).model_dump(),
         api_key=result.raw_api_key,
+        admin_email=result.admin_email,
+        admin_password=result.admin_password,
     )

@@ -13,12 +13,17 @@ export interface TenantRead {
 
 export interface TenantCreated extends TenantRead {
   api_key: string;
+  admin_email?: string;
+  admin_password?: string;
 }
 
 export interface TenantCreatePayload {
   name: string;
   slug: string;
   allowed_domains?: string[];
+  admin_email?: string;
+  admin_full_name?: string;
+  admin_password?: string;
 }
 
 export interface TenantUpdatePayload {

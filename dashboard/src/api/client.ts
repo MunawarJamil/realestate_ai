@@ -69,9 +69,51 @@ export interface BackendMessage {
   created_at: string;
 }
 
+export interface UserRead {
+  id: string;
+  email: string;
+  full_name: string;
+  role: 'super_admin' | 'agency_admin' | 'agent';
+  tenant_id?: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export interface AuthResponse {
+  tokens: TokenResponse;
+  user: UserRead;
+  tenant_name?: string | null;
+  tenant_slug?: string | null;
+}
+
+export interface LoginPayload {
+  email: string;
+  password: string;
+  tenant_slug?: string;
+}
+
+export interface PlatformLoginPayload {
+  email: string;
+  password: string;
+}
+
+export interface UserCreatePayload {
+  email: string;
+  password: string;
+  full_name: string;
+  role: 'agency_admin' | 'agent';
+}
+
 const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
-type AuthType = 'admin' | 'agency' | 'none';
+type AuthType = 'admin' | 'agency' | 'bearer' | 'none';
 
 interface RequestOptions extends RequestInit {
   auth?: AuthType;
@@ -104,15 +146,24 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     reqHeaders['Content-Type'] = 'application/json';
   }
 
-  // Dynamic Auth Header Injection
+  // Dynamic Auth Header Injection (supports JWT Bearer and API Key fallbacks)
   const authState = useAuthStore.getState();
   if (auth === 'admin') {
-    if (authState.adminKey) {
+    if (authState.platformToken) {
+      reqHeaders['Authorization'] = `Bearer ${authState.platformToken}`;
+    } else if (authState.adminKey) {
       reqHeaders['X-Admin-Key'] = authState.adminKey;
     }
   } else if (auth === 'agency') {
-    if (authState.apiKey) {
+    if (authState.agencyToken) {
+      reqHeaders['Authorization'] = `Bearer ${authState.agencyToken}`;
+    } else if (authState.apiKey) {
       reqHeaders['X-API-Key'] = authState.apiKey;
+    }
+  } else if (auth === 'bearer') {
+    const token = authState.platformToken || authState.agencyToken;
+    if (token) {
+      reqHeaders['Authorization'] = `Bearer ${token}`;
     }
   }
 
@@ -312,7 +363,9 @@ export const apiClient = {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
-      if (authState.apiKey) {
+      if (authState.agencyToken) {
+        headers['Authorization'] = `Bearer ${authState.agencyToken}`;
+      } else if (authState.apiKey) {
         headers['X-API-Key'] = authState.apiKey;
       }
 
@@ -393,5 +446,45 @@ export const apiClient = {
         reader.releaseLock();
       }
     },
+  },
+
+  auth: {
+    login: (payload: LoginPayload) =>
+      request<AuthResponse>('/api/v1/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    platformLogin: (payload: PlatformLoginPayload) =>
+      request<AuthResponse>('/api/v1/auth/platform/login', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    refreshToken: (refreshToken: string, audience: 'platform' | 'agency' = 'agency') =>
+      request<TokenResponse>(`/api/v1/auth/refresh?audience=${audience}`, {
+        method: 'POST',
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      }),
+
+    getMe: () =>
+      request<UserRead>('/api/v1/auth/me', {
+        method: 'GET',
+        auth: 'bearer',
+      }),
+
+    getAgencyUsers: (params?: { limit?: number; offset?: number }) =>
+      request<UserRead[]>('/api/v1/auth/users', {
+        method: 'GET',
+        auth: 'agency',
+        params,
+      }),
+
+    createAgencyUser: (payload: UserCreatePayload) =>
+      request<UserRead>('/api/v1/auth/users', {
+        method: 'POST',
+        auth: 'agency',
+        body: JSON.stringify(payload),
+      }),
   },
 };
