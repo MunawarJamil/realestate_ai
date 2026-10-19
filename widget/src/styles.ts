@@ -252,6 +252,29 @@ export function getWidgetStyles(config?: Partial<WidgetConfig>): string {
       border-bottom-left-radius: 4px;
     }
 
+    /* # 12b HITL - Human Broker & System Event Bubbles */
+    .re-msg-agent {
+      align-self: flex-start;
+      background: #131E30;
+      color: #F1F5F9;
+      border: 1px solid rgba(59, 130, 246, 0.35);
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 2px 10px rgba(59, 130, 246, 0.08);
+    }
+
+    .re-msg-system {
+      align-self: center;
+      background: rgba(255, 255, 255, 0.04);
+      color: #94A3B8;
+      font-size: 11.5px;
+      padding: 6px 14px;
+      border-radius: var(--radius-full);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      max-width: 92%;
+      text-align: center;
+      margin: 4px 0;
+    }
+
     /* Typing Indicator */
     .re-typing {
       display: flex;

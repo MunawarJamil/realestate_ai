@@ -1,12 +1,13 @@
 from collections.abc import AsyncIterator
 import json
 import logging
-from typing import Final
+from typing import Final, NoReturn
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
+from app.modules.auth.dependencies import AgencyUserContext, require_agency_user  # 12b HITL
 from app.modules.chat.dependencies import get_chat_service
 from app.modules.chat.exceptions import (
     ChatError,
@@ -14,10 +15,12 @@ from app.modules.chat.exceptions import (
     ConversationNotFoundError,
     InvalidMessageError,
 )
+from app.modules.chat.enums import ConversationStatus
 from app.modules.chat.schemas import (
     ConversationCreateRequest,
     ConversationList,
     ConversationRead,
+    ConversationSummaryResponse,  # 12b HITL
     MessageRead,
     SendMessageRequest,
 )
@@ -36,7 +39,7 @@ _STATUS_BY_ERROR: Final[tuple[tuple[type[ChatError], int], ...]] = (
 )
 
 
-def _raise_http(exc: ChatError) -> None:
+def _raise_http(exc: ChatError) -> NoReturn:
     for error_cls, status_code in _STATUS_BY_ERROR:
         if isinstance(exc, error_cls):
             raise HTTPException(status_code=status_code, detail=str(exc))
@@ -69,12 +72,15 @@ async def create_conversation(
     response_model=ConversationList,
 )
 async def list_conversations(
+    status: ConversationStatus | None = Query(None),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     tenant: Tenant = Depends(get_current_tenant),
     service: ChatService = Depends(get_chat_service),
 ) -> ConversationList:
-    items = await service.list_conversations(tenant_id=tenant.id, limit=limit, offset=offset)
+    items = await service.list_conversations(
+        tenant_id=tenant.id, status=status, limit=limit, offset=offset
+    )
     return ConversationList(
         items=[ConversationRead.model_validate(c) for c in items],
         total=len(items),
@@ -188,3 +194,85 @@ async def stream_chat(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# 12b HITL - Agent Claim Conversation Endpoint
+@router.post(
+    "/conversations/{conversation_id}/claim",
+    response_model=ConversationRead,
+)
+async def claim_conversation(
+    conversation_id: uuid.UUID,
+    ctx: AgencyUserContext = Depends(require_agency_user),
+    service: ChatService = Depends(get_chat_service),
+) -> ConversationRead:
+    try:
+        conv = await service.claim_conversation(
+            tenant_id=ctx.tenant.id,
+            conversation_id=conversation_id,
+            agent_id=ctx.user.id,
+            agent_name=ctx.user.full_name,
+        )
+        return ConversationRead.model_validate(conv)
+    except ChatError as exc:
+        _raise_http(exc)
+
+
+# 12b HITL - Agent Release Conversation back to AI Endpoint
+@router.post(
+    "/conversations/{conversation_id}/release",
+    response_model=ConversationRead,
+)
+async def release_conversation(
+    conversation_id: uuid.UUID,
+    ctx: AgencyUserContext = Depends(require_agency_user),
+    service: ChatService = Depends(get_chat_service),
+) -> ConversationRead:
+    try:
+        conv = await service.release_conversation(
+            tenant_id=ctx.tenant.id,
+            conversation_id=conversation_id,
+        )
+        return ConversationRead.model_validate(conv)
+    except ChatError as exc:
+        _raise_http(exc)
+
+
+# 12b HITL - Agent Resolve Conversation Endpoint
+@router.post(
+    "/conversations/{conversation_id}/resolve",
+    response_model=ConversationRead,
+)
+async def resolve_conversation(
+    conversation_id: uuid.UUID,
+    ctx: AgencyUserContext = Depends(require_agency_user),
+    service: ChatService = Depends(get_chat_service),
+) -> ConversationRead:
+    try:
+        conv = await service.resolve_conversation(
+            tenant_id=ctx.tenant.id,
+            conversation_id=conversation_id,
+        )
+        return ConversationRead.model_validate(conv)
+    except ChatError as exc:
+        _raise_http(exc)
+
+
+# 12b HITL - AI Handover Summary Endpoint
+@router.get(
+    "/conversations/{conversation_id}/summary",
+    response_model=ConversationSummaryResponse,
+)
+async def get_conversation_summary(
+    conversation_id: uuid.UUID,
+    tenant: Tenant = Depends(get_current_tenant),
+    service: ChatService = Depends(get_chat_service),
+) -> ConversationSummaryResponse:
+    try:
+        return await service.summarize_conversation(
+            tenant_id=tenant.id,
+            conversation_id=conversation_id,
+        )
+    except ChatError as exc:
+        _raise_http(exc)
+

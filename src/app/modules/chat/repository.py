@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.chat.enums import MessageRole
+from app.modules.chat.enums import ConversationStatus, MessageRole, SenderType
 from app.modules.chat.models import Conversation, Message
 
 
@@ -48,18 +48,35 @@ class ChatRepository:
         self,
         *,
         tenant_id: uuid.UUID,
+        status: ConversationStatus | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Sequence[Conversation]:
-        stmt = (
-            select(Conversation)
-            .where(Conversation.tenant_id == tenant_id)
-            .order_by(desc(Conversation.created_at))
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = select(Conversation).where(Conversation.tenant_id == tenant_id)
+        if status is not None:
+            stmt = stmt.where(Conversation.status == status)
+        stmt = stmt.order_by(desc(Conversation.created_at)).limit(limit).offset(offset)
         result = await self._session.execute(stmt)
         return result.scalars().all()
+
+    async def update_conversation_status(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        status: ConversationStatus,
+        assigned_agent_id: uuid.UUID | None = None,
+    ) -> Conversation | None:
+        conversation = await self.get_conversation(
+            tenant_id=tenant_id, conversation_id=conversation_id
+        )
+        if conversation is None:
+            return None
+        conversation.status = status
+        if assigned_agent_id is not None or status == ConversationStatus.AI:
+            conversation.assigned_agent_id = assigned_agent_id
+        await self._session.flush()
+        return conversation
 
     async def list_conversations_for_visitor(
         self,
@@ -127,11 +144,25 @@ class ChatRepository:
         role: MessageRole,
         content: str,
         token_count: int | None = None,
+        sender_type: SenderType | None = None,
+        agent_id: uuid.UUID | None = None,
     ) -> Message:
+        if sender_type is None:
+            if agent_id is not None:
+                sender_type = SenderType.AGENT
+            elif role == MessageRole.USER:
+                sender_type = SenderType.VISITOR
+            elif role == MessageRole.ASSISTANT:
+                sender_type = SenderType.AI
+            else:
+                sender_type = SenderType.SYSTEM
+
         message = Message(
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             role=role,
+            sender_type=sender_type,
+            agent_id=agent_id,
             content=content,
             token_count=token_count,
         )

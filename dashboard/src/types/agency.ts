@@ -1,12 +1,31 @@
+// # 12b HITL - Enhanced Message Contract
 export interface Message {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
+  sender_type?: 'visitor' | 'ai' | 'agent' | 'system'; // # 12b HITL
   content: string;
   created_at: string;
   grounded_sources?: string[];
 }
 
-export type ConversationStatus = 'active' | 'qualified_lead' | 'closed';
+// # 12b HITL - Conversation Status with Multi-tier States
+export type ConversationStatus =
+  | 'ai'
+  | 'handoff_requested'
+  | 'human_active'
+  | 'resolved'
+  | 'active'
+  | 'qualified_lead'
+  | 'closed';
+
+// # 12b HITL - AI Executive Brief Interface
+export interface BackendConversationSummary {
+  conversation_id: string;
+  summary: string;
+  key_intent?: string | null;
+  budget?: string | null;
+  preferred_location?: string | null;
+}
 
 export interface Conversation {
   id: string;
@@ -19,6 +38,8 @@ export interface Conversation {
   budget: string;
   property_interest: string;
   status: ConversationStatus;
+  assigned_agent_id?: string | null; // # 12b HITL
+  summary?: BackendConversationSummary | null; // # 12b HITL
   started_at: string;
   last_message_at: string;
   tags: string[];

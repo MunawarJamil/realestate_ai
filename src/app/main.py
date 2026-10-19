@@ -12,7 +12,9 @@ from app.integrations.llm.client import build_llm_client
 from app.integrations.qdrant.client import close_qdrant, init_qdrant
 from app.integrations.qdrant.collection import ensure_collection
 from app.modules.auth.router import router as auth_router
+from app.modules.chat.redis_pubsub import close_redis_pubsub, init_redis_pubsub  # 12b HITL
 from app.modules.chat.router import router as chat_router
+from app.modules.chat.ws_router import router as ws_router  # 12b HITL
 from app.modules.knowledge.router import router as knowledge_router
 from app.modules.tenants.router import me_router
 from app.modules.tenants.router import router as tenants_router
@@ -28,9 +30,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     app.state.llm_client = build_llm_client(settings)
     await init_queue()
+    await init_redis_pubsub()  # 12b HITL
     await ensure_collection(client)
     await log.ainfo("app.startup", env=settings.app_env)
     yield
+    await close_redis_pubsub()  # 12b HITL
     await close_queue()
     await dispose_engine()
     await close_qdrant()
@@ -78,4 +82,5 @@ app.include_router(tenants_router, prefix="/api/v1")
 app.include_router(me_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
+app.include_router(ws_router, prefix="/api/v1")  # 12b HITL
 app.include_router(widget_router, prefix="/api/v1")

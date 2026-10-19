@@ -61,3 +61,32 @@ def build_chat_messages(
 
     messages.append(ChatMessage(role="user", content=user_query))
     return messages
+
+
+# 12b HITL - AI Conversation Summarizer Prompt for Live Agent Handover
+def build_summary_messages(history: Sequence[ChatMessage]) -> list[ChatMessage]:
+    """Builds a prompt instructing the LLM to generate a concise JSON handover summary."""
+    transcript = []
+    for msg in history:
+        sender = "Visitor" if msg.role == "user" else "Assistant"
+        transcript.append(f"{sender}: {msg.content.strip()}")
+    dialogue = "\n".join(transcript)
+
+    system_prompt = (
+        "You are an executive real-estate assistant summarizing a visitor conversation for a live human broker.\n"
+        "Extract the visitor's core requirement and return ONLY valid JSON with this exact structure:\n"
+        "{\n"
+        '  "summary": "Concise 1-2 sentence overview of what the client is asking for.",\n'
+        '  "key_intent": "Key requirement or property type (e.g., 3-Bedroom Villa, Off-plan Investment)",\n'
+        '  "budget": "Stated budget or price range if mentioned, else null",\n'
+        '  "preferred_location": "Preferred areas or communities if mentioned, else null"\n'
+        "}\n"
+        "Do not include any Markdown ticks or extra commentary. Return only the JSON object."
+    )
+
+    user_prompt = f"Visitor Transcript:\n{dialogue}\n\nGenerate the summary JSON."
+    return [
+        ChatMessage(role="system", content=system_prompt),
+        ChatMessage(role="user", content=user_prompt),
+    ]
+
