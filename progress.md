@@ -1,9 +1,9 @@
 # PROJECT PROGRESS TRACKER (progress.md)
 
 > **Last Updated**: 2026-10-19  
-> **Current Phase**: Step 13 / Phase 8 - Embeddable Web Chat Widget (Completed ✅)  
-> **Status**: Completed (Ready for Next Phase: Phase 5 Leads or Phase 7 Auth)  
-> **Current File Context**: [`widget/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/widget/)
+> **Current Phase**: Phase 9 / Steps 14 & 15 — Dual-Role Dashboard UI (Completed ✅)  
+> **Status**: Completed (Ready for Next Phase: Phase 5 Leads Backend or API Integrations)  
+> **Current File Context**: [`dashboard/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/dashboard/)
 
 ---
 
@@ -21,7 +21,39 @@
   - Shadow DOM TypeScript widget with unified dark theme tokens (`#0B0B0D`, orange `#F97316`).
   - Safe Markdown parser, localStorage session persistence, auto-scroll, and typing indicator.
   - Test embed demo page (`widget/index.html`) and unit test suite.
-- **Immediate Next Step**: Phase 5 — Lead Capture & CRM Qualification Pipeline (`src/app/modules/leads/`) OR Agency Auth & Dashboard UI (`src/app/modules/auth/`).
+- **Phase 9 / Step 14 & 15 (Dual-Role Dashboard UI)**: 100% Complete ✅:
+  - [x] **14.1 Frontend Scaffold & Design Tokens**: React 19 + Vite + Tailwind CSS with unified dark luxury palette (`#0B0B0D`, `#151517`, `#F97316`).
+  - [x] **14.2 Dual-Portal Shell & Routing**: TanStack Router code-based tree for `/platform/*` and `/app/*`.
+  - [x] **14.3 Super Admin Login**: Discrete access portal with MFA indicators and dark luxury styling.
+  - [x] **14.4 Super Admin Overview**: 4 high-value KPI cards, microservices health, and live tenant traffic.
+  - [x] **14.5 Tenants Management**: Search, filter, status suspend/activate toggling, and "Provision New Agency" modal.
+  - [x] **14.6 System & AI Gateway (`/platform/system`)**: Emergency AI Traffic Circuit Breaker toggle, microservices telemetry, and sliding-window rate limit policy inspector.
+  - [x] **14.7 Platform Audit & Security Logs (`/platform/audit`)**: Filterable chronological administrative audit trail with actor IP and event badges.
+  - [x] **14.8 Tenant Configuration Drawer**: On-the-fly allowed domains whitelist editing and instant zero-downtime key rotation.
+  - [x] **15.1 Agency Data Contracts & Mock State**: `types/agency.ts` and `mock/agencyData.ts` (Conversations, Leads, KnowledgeDocs).
+  - [x] **15.2 Agency Overview & Split Conversations Inbox**:
+    - `AgencyDashboardPage.tsx`: 4 high-value KPIs (Today's inquiries, Hot CRM leads, Indexed docs, Grounding rate), hot leads alert table, live embed card.
+    - `AgencyConversationsPage.tsx`: Split 2-pane inbox with visitor cards, full transcript reader, grounded RAG citation badges, visitor CRM metadata, and agent reply action.
+  - [x] **15.3 CRM Qualified Leads Pipeline (`/app/leads`)**:
+    - `AgencyLeadsPage.tsx`: Interactive pipeline table with search, status filtering, AI score thresholds (Hot $\ge 85$, Warm $70-84$), status dropdown updater, manual lead entry modal, and CSV export.
+  - [x] **15.5 Agency Widget Customization & Embed Settings (`/app/settings`)**:
+    - `AgencySettingsPage.tsx`: Interactive 1:1 scale live widget preview with dynamic accent color selection, custom welcome greeting, quick inquiry prompts, and whitelisted origin script tag.
+  - [x] **15.6 Responsive, Spacing & Table Layout Overhaul**:
+    - Mobile slide-out drawer sidebar with hamburger button for `<lg` devices.
+    - Full horizontal table scrolling with single-line rows (`whitespace-nowrap`) preventing broken multi-word cells across all data tables (Knowledge, Leads, Tenants, Audit).
+    - Vertically stacked clean contact info (Name, Phone below with icon, Email below with icon) in CRM leads table.
+    - Conversation 2-pane inbox UX polish: reduced sidebar width to compact `w-64/w-72`, single-line truncated message previews, and separated floating bottom with clear margins.
+  - [x] **15.7 Dual Theme System (Dark Mode + Porcelain `#FFFCF4` Light Mode)**:
+    - Persistent theme context (`ThemeContext.tsx`) syncing to `localStorage` and `<html>` classes (`light` / `dark`).
+    - Interactive animated `<ThemeToggle />` pill button placed in both Agency Admin and Super Admin top headers.
+    - Complete luxury Porcelain palette (`#FFFCF4` canvas, `#FAF5E8` sidebar, `#FFFFFF` crisp cards, warm stone borders `#E8E2D5`, and deep stone typography).
+- **Immediate Next Step**: Phase 5 — Lead Capture & Qualification Pipeline (`src/app/modules/leads/`) or connecting frontend React state to live FastAPI endpoints.
+
+
+
+
+
+
 
 ---
 
@@ -145,5 +177,23 @@
 - [x] **13.6 Test Embed Page & Verification**:
   - Standalone luxury agency demo embed test page (`widget/index.html`).
   - Unit test suite for public widget endpoints (`tests/unit/modules/widget/test_widget_endpoints.py`).
+
+---
+
+### [x] Phase 9 / Step 14: Dual-Role Dashboard UI (`dashboard/`) (COMPLETED ✅)
+- [x] **Dual Entrypoint & Architecture Strategy**:
+  - Alag entry points, same codebase:
+    - `/login` & `/app/*` for Agency Admin.
+    - `/platform/login` & `/platform/*` for Super/Platform Admin (isolated discrete gateway).
+- [x] **Frontend Tech Stack Setup**:
+  - React 19 + Vite in `dashboard/` (Port 5174).
+  - Tailwind CSS with unified dark palette tokens (`#0B0B0D`, `#151517`, `#F97316`, warm glow).
+  - TanStack Router code-based routing tree with type safety.
+- [x] **V1 Implementation (Static / Mock UI)**:
+  - Super-Admin layout & dedicated sidebar (`/platform/*`).
+  - Lean Platform Overview with 4 high-value KPI cards and core services health.
+  - Agency / Tenant management table with search, status toggling, credentials preview, and "Provision Agency" modal.
+  - Agency-Admin (`/app/*`) layout & portal overview scaffold ready for CRM and Knowledge modules.
+
 
 

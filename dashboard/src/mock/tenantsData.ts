@@ -1,0 +1,60 @@
+import type { Tenant, PlatformMetrics } from '../types/tenant';
+
+export const initialTenants: Tenant[] = [
+  {
+    id: 't-101',
+    name: 'Apex Luxury Properties',
+    slug: 'apex-luxury',
+    allowed_domains: ['apexproperties.ae', 'localhost:5173'],
+    status: 'active',
+    plan: 'Enterprise',
+    created_at: '2026-10-15',
+    total_conversations: 412,
+    api_key_preview: 'rk_live_9a4f••••••••••••••',
+    widget_key_preview: 'wk_live_b21e••••••••••••••',
+  },
+  {
+    id: 't-102',
+    name: 'Belgravia Prime Estates',
+    slug: 'belgravia-prime',
+    allowed_domains: ['belgraviaprime.co.uk'],
+    status: 'active',
+    plan: 'Growth',
+    created_at: '2026-10-16',
+    total_conversations: 289,
+    api_key_preview: 'rk_live_7c3d••••••••••••••',
+    widget_key_preview: 'wk_live_f890••••••••••••••',
+  },
+  {
+    id: 't-103',
+    name: 'Elysium Palm Residences',
+    slug: 'elysium-res',
+    allowed_domains: ['elysium.com', 'staging.elysium.com'],
+    status: 'active',
+    plan: 'Enterprise',
+    created_at: '2026-10-17',
+    total_conversations: 156,
+    api_key_preview: 'rk_live_1d8e••••••••••••••',
+    widget_key_preview: 'wk_live_a342••••••••••••••',
+  },
+  {
+    id: 't-104',
+    name: 'Skyline Capital Realty',
+    slug: 'skyline-capital',
+    allowed_domains: ['skylinecapital.com'],
+    status: 'suspended',
+    plan: 'Starter',
+    created_at: '2026-10-18',
+    total_conversations: 42,
+    api_key_preview: 'rk_live_4b2a••••••••••••••',
+    widget_key_preview: 'wk_live_c911••••••••••••••',
+  },
+];
+
+export const platformMetrics: PlatformMetrics = {
+  totalTenants: 4,
+  activeTenants: 3,
+  activeWidgets: 3,
+  totalMessages24h: 1482,
+  avgResponseTimeMs: 310,
+};
