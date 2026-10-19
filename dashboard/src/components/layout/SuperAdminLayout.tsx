@@ -13,11 +13,13 @@ import {
   X,
 } from 'lucide-react';
 import { ThemeToggle } from '../ui/ThemeToggle';
+import { useAuthStore } from '../../store/useAuthStore';
 
 export const SuperAdminLayout: React.FC = () => {
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
   const navigate = useNavigate();
+  const clearAdminKey = useAuthStore((s) => s.clearAdminKey);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Auto-close mobile drawer on route change
@@ -26,6 +28,7 @@ export const SuperAdminLayout: React.FC = () => {
   }, [currentPath]);
 
   const handleLogout = () => {
+    clearAdminKey();
     navigate({ to: '/platform/login' });
   };
 
