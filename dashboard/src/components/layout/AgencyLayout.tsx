@@ -12,16 +12,24 @@ import {
   X,
 } from 'lucide-react';
 import { ThemeToggle } from '../ui/ThemeToggle';
+import { useAuthStore } from '../../store/useAuthStore';
 
 export const AgencyLayout: React.FC = () => {
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
   const navigate = useNavigate();
+  const tenant = useAuthStore((s) => s.tenant);
+  const clearApiKey = useAuthStore((s) => s.clearApiKey);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [currentPath]);
+
+  const handleLogout = () => {
+    clearApiKey();
+    navigate({ to: '/login' });
+  };
 
   const navItems = [
     { label: 'Overview', path: '/app', icon: LayoutDashboard },
@@ -60,12 +68,12 @@ export const AgencyLayout: React.FC = () => {
           {/* Logo & Agency Header */}
           <div className="p-5 sm:p-6 border-b border-white/8 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-zinc-800 border border-white/10 flex items-center justify-center font-bold text-white">
-                A
+              <div className="w-8 h-8 rounded-lg bg-zinc-800 border border-white/10 flex items-center justify-center font-bold text-white uppercase">
+                {tenant?.name ? tenant.name.charAt(0) : 'A'}
               </div>
-              <div>
-                <span className="font-bold text-sm tracking-tight text-white block">
-                  Apex Luxury
+              <div className="overflow-hidden">
+                <span className="font-bold text-sm tracking-tight text-white block truncate">
+                  {tenant?.name || 'Agency Workspace'}
                 </span>
                 <span className="text-[11px] text-zinc-400">Agency Workspace</span>
               </div>
@@ -117,7 +125,7 @@ export const AgencyLayout: React.FC = () => {
           </Link>
 
           <button
-            onClick={() => navigate({ to: '/login' })}
+            onClick={handleLogout}
             className="w-full flex items-center gap-2.5 text-xs text-zinc-400 hover:text-zinc-200 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5" />

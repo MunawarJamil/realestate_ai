@@ -47,7 +47,27 @@
     - Persistent theme context (`ThemeContext.tsx`) syncing to `localStorage` and `<html>` classes (`light` / `dark`).
     - Interactive animated `<ThemeToggle />` pill button placed in both Agency Admin and Super Admin top headers.
     - Complete luxury Porcelain palette (`#FFFCF4` canvas, `#FAF5E8` sidebar, `#FFFFFF` crisp cards, warm stone borders `#E8E2D5`, and deep stone typography).
-- **Immediate Next Step (Next Chat)**: Phase 7 — Authentication & Dashboard API Integration (Step 7.1: Add `GET /api/v1/tenants` for Super Admin, then wire TanStack Query in `dashboard/` to FastAPI endpoints).
+- **Phase 7: Dashboard API & Backend Live Integration (IN PROGRESS 🟡)**:
+  - [x] **Step 7.1: Backend Super Admin Endpoints**:
+    - `GET /api/v1/tenants` with pagination (`limit`, `offset`) and `is_active` filter.
+    - `PATCH /api/v1/tenants/{tenant_id}` for instant status toggle & domain whitelist updates.
+    - Added `list_all` & `update` to `TenantRepository`, `TenantService`, and `router.py`. Passed `mypy --strict`.
+  - [x] **Step 7.2: Frontend Dynamic Auth Store & Production API Client**:
+    - Created Zustand store (`useAuthStore.ts`) with `persist` handling `X-Admin-Key` and `X-API-Key`.
+    - Created type-safe `apiClient` (`client.ts`) with `ApiError` class and SSE real-time streaming reader.
+  - [x] **Step 7.3: Super Admin Portal Live Wiring (`/platform/*`)**:
+    - Connected `/platform/login` to live admin key verification.
+    - Wired `TenantsManagementPage.tsx` to live backend: database tenant fetching, "Provision Agency" with raw API key reveal modal, status toggle, and allowed origin whitelist drawer.
+  - [x] **Step 7.4: Agency Admin Knowledge Base Live Wiring (`/app/knowledge`)**:
+    - Connected `AgencyLoginPage.tsx` to live backend tenant verification via `GET /api/v1/tenants/me`.
+    - Connected `AgencyLayout.tsx` to dynamic agency branding and session logout.
+    - Wired `AgencyKnowledgePage.tsx` to real backend endpoints: `GET /api/v1/knowledge/documents`, multipart file upload `POST /api/v1/knowledge/documents`, document deletion `DELETE /api/v1/knowledge/documents/{id}`.
+    - Integrated automatic background polling for in-flight document chunking & vectorization.
+  - [x] **Step 7.5: Agency Live Conversations & Assistant SSE Streaming (`/app/conversations`)**:
+    - Wired `AgencyConversationsPage.tsx` to `GET /api/v1/chat/conversations` and message history `GET /api/v1/chat/conversations/{id}/messages`.
+    - Integrated real-time SSE token-by-token streaming reader via `POST /api/v1/chat/conversations/{id}/stream`.
+    - Added instant thread provisioning via `POST /api/v1/chat/conversations`.
+- **Immediate Next Step**: Step 7.6 (End-to-End Verification & Conventional Git Commit).
 
 
 
@@ -137,10 +157,13 @@
 
 ---
 
-### [ ] Phase 7: Agency Auth & Dashboard API (`src/app/modules/auth/`)
-- [ ] `User` model with roles (Agency Admin, Agent)
-- [ ] Argon2 password hashing & JWT token issue/refresh
-- [ ] Protected agency dashboard routes
+### [ ] Phase 7: Dashboard API & Backend Live Integration (IN PROGRESS 🟡)
+- [x] **7.1 Backend Super Admin Tenants API**: `GET /api/v1/tenants`, `PATCH /api/v1/tenants/{id}`, repo queries, service methods.
+- [x] **7.2 Dynamic Auth Store & Production API Client**: Zustand `useAuthStore` with localStorage persistence, `apiClient` with typed `ApiError` & SSE stream reader.
+- [x] **7.3 Super Admin Portal Live Wiring (`/platform/*`)**: Real tenant fetching, instant provisioning modal with secret key display, status toggling, allowed origins whitelist.
+- [x] **7.4 Agency Knowledge Base Live Wiring (`/app/knowledge`)**: Real PDF/doc upload, document listing, ingestion status polling, and Qdrant semantic search tester.
+- [x] **7.5 Agency Live Conversations & Streaming (`/app/conversations`)**: Chat inbox, conversation history, real-time SSE assistant streaming.
+- [ ] **7.6 End-to-End Verification**: Complete smoke tests and validation.
 
 ---
 

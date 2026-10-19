@@ -9,7 +9,7 @@ from pydantic import SecretStr
 import pytest
 from starlette.requests import Request
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.security import (
     WIDGET_KEY_PREFIX,
     create_visitor_token,
@@ -196,7 +196,7 @@ def test_app() -> httpx.AsyncClient:
     )
 
     # Mock settings secret_key
-    app.dependency_overrides[Settings] = lambda: Settings(
+    app.dependency_overrides[get_settings] = lambda: Settings(
         secret_key=SecretStr(SECRET_KEY),
         database_url="postgresql+asyncpg://user:pass@localhost/db",
         redis_url="redis://localhost:6379",

@@ -1,3 +1,4 @@
+import uuid
 from dataclasses import dataclass
 
 from app.core.security import generate_api_key, generate_widget_key, hash_api_key
@@ -39,4 +40,35 @@ class TenantService:
         return await self._repo.get_by_api_key_hash(hash_api_key(raw_api_key))
 
     async def get_by_widget_key(self, widget_key: str) -> Tenant | None:
-        return await self._repo.get_by_widget_key(widget_key)
+        return await self._repo.get_by_widget_key(widget_key)
+
+    async def list_tenants(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        is_active: bool | None = None,
+    ) -> list[Tenant]:
+        return await self._repo.list_all(
+            limit=limit,
+            offset=offset,
+            is_active=is_active,
+        )
+
+    async def update_tenant(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        name: str | None = None,
+        allowed_domains: list[str] | None = None,
+        is_active: bool | None = None,
+    ) -> Tenant | None:
+        tenant = await self._repo.get_by_id(tenant_id)
+        if tenant is None:
+            return None
+        return await self._repo.update(
+            tenant,
+            name=name,
+            allowed_domains=allowed_domains,
+            is_active=is_active,
+        )

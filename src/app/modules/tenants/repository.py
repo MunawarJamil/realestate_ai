@@ -53,4 +53,39 @@ class TenantRepository:
                 Tenant.widget_key == widget_key, Tenant.is_active.is_(True)
             )
         )
-        return result.scalar_one_or_none()
+        return result.scalar_one_or_none()
+
+    async def list_all(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        is_active: bool | None = None,
+    ) -> list[Tenant]:
+        stmt = (
+            select(Tenant)
+            .order_by(Tenant.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        if is_active is not None:
+            stmt = stmt.where(Tenant.is_active == is_active)
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def update(
+        self,
+        tenant: Tenant,
+        *,
+        name: str | None = None,
+        allowed_domains: list[str] | None = None,
+        is_active: bool | None = None,
+    ) -> Tenant:
+        if name is not None:
+            tenant.name = name
+        if allowed_domains is not None:
+            tenant.allowed_domains = allowed_domains
+        if is_active is not None:
+            tenant.is_active = is_active
+        await self._session.flush()
+        return tenant
