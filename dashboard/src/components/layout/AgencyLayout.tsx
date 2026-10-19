@@ -19,7 +19,8 @@ export const AgencyLayout: React.FC = () => {
   const currentPath = routerState.location.pathname;
   const navigate = useNavigate();
   const tenant = useAuthStore((s) => s.tenant);
-  const clearApiKey = useAuthStore((s) => s.clearApiKey);
+  const clearAgencyAuth = useAuthStore((s) => s.clearAgencyAuth);
+  const agencyUser = useAuthStore((s) => s.agencyUser);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -27,7 +28,7 @@ export const AgencyLayout: React.FC = () => {
   }, [currentPath]);
 
   const handleLogout = () => {
-    clearApiKey();
+    clearAgencyAuth();
     navigate({ to: '/login' });
   };
 
@@ -153,9 +154,28 @@ export const AgencyLayout: React.FC = () => {
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full font-medium whitespace-nowrap shrink-0">
-              Live Widget Active
-            </span>
+            {agencyUser ? (
+              <div className="flex items-center gap-2">
+                <span className="hidden sm:inline-block text-[11px] font-medium px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-white/5 capitalize">
+                  {agencyUser.role.replace('_', ' ')}
+                </span>
+                <div className="w-8 h-8 rounded-full bg-[#F97316]/15 border border-[#F97316]/30 flex items-center justify-center text-xs font-semibold text-[#F97316]">
+                  {agencyUser.full_name.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="hidden md:flex flex-col text-left">
+                  <span className="text-xs font-medium text-zinc-200 leading-tight">
+                    {agencyUser.full_name}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 leading-tight">
+                    {agencyUser.email}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full font-medium whitespace-nowrap shrink-0">
+                Live Widget Active
+              </span>
+            )}
           </div>
         </header>
 

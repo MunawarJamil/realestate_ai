@@ -13,6 +13,9 @@ import {
   Trash2,
   RefreshCw,
   AlertCircle,
+  Mail,
+  Lock,
+  User,
 } from 'lucide-react';
 import type { Tenant, TenantStatus, TenantRead, TenantCreated } from '../../types/tenant';
 import { Badge } from '../../components/ui/Badge';
@@ -62,6 +65,9 @@ export const TenantsManagementPage: React.FC = () => {
   const [newAgencyName, setNewAgencyName] = useState('');
   const [newAllowedDomains, setNewAllowedDomains] = useState('');
   const [newPlan, setNewPlan] = useState<'Starter' | 'Growth' | 'Enterprise'>('Growth');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminFullName, setAdminFullName] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
 
   const generatedSlug = newAgencyName
     .toLowerCase()
@@ -139,6 +145,9 @@ export const TenantsManagementPage: React.FC = () => {
         name: newAgencyName.trim(),
         slug: generatedSlug,
         allowed_domains: domains.length > 0 ? domains : ['*'],
+        admin_email: adminEmail.trim() || undefined,
+        admin_full_name: adminFullName.trim() || undefined,
+        admin_password: adminPassword.trim() || undefined,
       });
 
       // Add to list immediately
@@ -147,8 +156,11 @@ export const TenantsManagementPage: React.FC = () => {
       setNewAgencyName('');
       setNewAllowedDomains('');
       setNewPlan('Growth');
+      setAdminEmail('');
+      setAdminFullName('');
+      setAdminPassword('');
 
-      // Present the credentials modal with raw API key
+      // Present the credentials modal with raw API key & admin credentials
       setCreatedCredentials(created);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -492,6 +504,71 @@ export const TenantsManagementPage: React.FC = () => {
             </select>
           </div>
 
+          {/* Initial Agency Admin Account */}
+          <div className="pt-3 border-t border-white/8 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-[#F97316] flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5" />
+                  Initial Agency Admin Credentials
+                </h4>
+                <p className="text-[11px] text-zinc-500">
+                  Allow the agency owner to sign in via the Agency Login portal.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-300 mb-1">
+                Admin Work Email
+              </label>
+              <div className="relative">
+                <Mail className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  placeholder="e.g. principal@agency.com"
+                  className="w-full pl-9 pr-3 py-2 bg-[#0B0B0D] border border-white/10 rounded-lg text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#F97316]"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  Admin Full Name
+                </label>
+                <input
+                  type="text"
+                  value={adminFullName}
+                  onChange={(e) => setAdminFullName(e.target.value)}
+                  placeholder="e.g. John Doe"
+                  className="w-full px-3 py-2 bg-[#0B0B0D] border border-white/10 rounded-lg text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#F97316]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  Admin Password
+                </label>
+                <div className="relative">
+                  <Lock className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    placeholder="Leave blank to auto-generate"
+                    className="w-full pl-9 pr-3 py-2 bg-[#0B0B0D] border border-white/10 rounded-lg text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#F97316] font-mono text-[11px]"
+                  />
+                </div>
+              </div>
+            </div>
+            <p className="text-[11px] text-zinc-500">
+              If left blank, a secure random password will be generated automatically and displayed upon creation.
+            </p>
+          </div>
+
           {createError && (
             <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
               {createError}
@@ -526,9 +603,64 @@ export const TenantsManagementPage: React.FC = () => {
             <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-start gap-2 text-xs text-amber-300">
               <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <span>
-                <strong>Important:</strong> The raw API key below will NEVER be shown again. Securely copy it and provide it to the agency admin.
+                <strong>Important:</strong> Save these credentials immediately. The private API key and initial password are only displayed once.
               </span>
             </div>
+
+            {/* Portal Login Details (If admin user created) */}
+            {createdCredentials.admin_email && (
+              <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/10 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-[#F97316] uppercase tracking-wider flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5" />
+                    Agency Admin Login Credentials
+                  </span>
+                  <span className="text-[11px] text-zinc-500 font-mono">app.domain.com/login</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <label className="text-[10px] text-zinc-400 uppercase font-medium">Login Email</label>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <input
+                        readOnly
+                        type="text"
+                        value={createdCredentials.admin_email}
+                        className="w-full px-2 py-1 bg-[#0B0B0D] border border-white/10 rounded text-xs text-white select-all font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(createdCredentials.admin_email || '', 'new_email')}
+                        className="p-1 hover:bg-white/10 rounded text-zinc-400 hover:text-white"
+                        title="Copy email"
+                      >
+                        {copiedKey === 'new_email' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-zinc-400 uppercase font-medium">Temporary Password</label>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <input
+                        readOnly
+                        type="text"
+                        value={createdCredentials.admin_password || ''}
+                        className="w-full px-2 py-1 bg-[#0B0B0D] border border-white/10 rounded text-xs text-emerald-400 font-bold select-all font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(createdCredentials.admin_password || '', 'new_pass')}
+                        className="p-1 hover:bg-white/10 rounded text-zinc-400 hover:text-white"
+                        title="Copy password"
+                      >
+                        {copiedKey === 'new_pass' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Raw Private API Key */}
             <div className="space-y-1.5">
@@ -584,13 +716,51 @@ export const TenantsManagementPage: React.FC = () => {
               </div>
             </div>
 
+            {/* Complete Onboarding Package Button */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const packageText = [
+                    '=========================================',
+                    `RealEstate AI — Agency Onboarding Pack`,
+                    '=========================================',
+                    `Agency Name: ${createdCredentials.name}`,
+                    `Agency Slug: ${createdCredentials.slug}`,
+                    `Portal URL:  ${window.location.origin}/login`,
+                    '',
+                    createdCredentials.admin_email ? `Admin Email:    ${createdCredentials.admin_email}` : '',
+                    createdCredentials.admin_password ? `Admin Password: ${createdCredentials.admin_password}` : '',
+                    '',
+                    `Secret API Key:    ${createdCredentials.api_key}`,
+                    `Public Widget Key: ${createdCredentials.widget_key}`,
+                    '=========================================',
+                  ].filter(Boolean).join('\n');
+                  copyToClipboard(packageText, 'onboard_pack');
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-semibold text-white transition-all cursor-pointer"
+              >
+                {copiedKey === 'onboard_pack' ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-400" />
+                    <span className="text-emerald-400 font-bold">Onboarding Pack Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4 text-[#F97316]" />
+                    <span>Copy Complete Onboarding Pack (For Client Handover)</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             <div className="pt-3 border-t border-white/8 flex justify-end">
               <Button
                 variant="primary"
                 size="md"
                 onClick={() => setCreatedCredentials(null)}
               >
-                <span>Done & Copied</span>
+                <span>Done & Close</span>
               </Button>
             </div>
           </div>

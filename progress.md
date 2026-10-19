@@ -47,17 +47,19 @@
     - Persistent theme context (`ThemeContext.tsx`) syncing to `localStorage` and `<html>` classes (`light` / `dark`).
     - Interactive animated `<ThemeToggle />` pill button placed in both Agency Admin and Super Admin top headers.
     - Complete luxury Porcelain palette (`#FFFCF4` canvas, `#FAF5E8` sidebar, `#FFFFFF` crisp cards, warm stone borders `#E8E2D5`, and deep stone typography).
-- **Phase 7: Dashboard API & Backend Live Integration (IN PROGRESS 🟡)**:
-  - [x] **Step 7.1: Backend Super Admin Endpoints**:
-    - `GET /api/v1/tenants` with pagination (`limit`, `offset`) and `is_active` filter.
-    - `PATCH /api/v1/tenants/{tenant_id}` for instant status toggle & domain whitelist updates.
-    - Added `list_all` & `update` to `TenantRepository`, `TenantService`, and `router.py`. Passed `mypy --strict`.
-  - [x] **Step 7.2: Frontend Dynamic Auth Store & Production API Client**:
-    - Created Zustand store (`useAuthStore.ts`) with `persist` handling `X-Admin-Key` and `X-API-Key`.
-    - Created type-safe `apiClient` (`client.ts`) with `ApiError` class and SSE real-time streaming reader.
-  - [x] **Step 7.3: Super Admin Portal Live Wiring (`/platform/*`)**:
-    - Connected `/platform/login` to live admin key verification.
-    - Wired `TenantsManagementPage.tsx` to live backend: database tenant fetching, "Provision Agency" with raw API key reveal modal, status toggle, and allowed origin whitelist drawer.
+- **Phase 7 & 8: Authentication, RBAC & Multi-Tenant Live Integration (COMPLETED ✅)**:
+  - [x] **Step 8.1 & 8.2: Dual-Role Authentication & RBAC**:
+    - PostgreSQL `users` table created with `role` (`super_admin`, `agency_admin`, `agent`), foreign key `tenant_id` to `tenants(id)`, and hashed passwords via `argon2`.
+    - Endpoints: `POST /api/v1/auth/login` (agency JWT with `aud="agency"`) and `POST /api/v1/auth/platform/login` (super admin JWT with `aud="platform"`).
+    - Hardened route security: Platform routes reject non-super_admin tokens; agency routes strictly resolve `tenant_id` from the authenticated user token.
+  - [x] **Super Admin Agency Onboarding with Admin Credentials**:
+    - Super Admin can enter Agency Name, Allowed Domains, and provision initial Admin Email & Password directly in the "Provision New Agency" modal.
+    - One-click "Copy Complete Onboarding Pack" generates client handover bundle (Portal URL, Email, Password, API Key, Widget Key, and Embed Snippet).
+  - [x] **Zero-Cross-Agency Leakage & Clean State Enforcement**:
+    - Removed all hardcoded mock data (`Apex Luxury`) from Agency Dashboard, Leads, Conversations, and Settings.
+    - When a newly onboarded agency logs in, they see a completely clean workspace tailored exclusively to their tenant.
+    - Added comprehensive empty states and a "Workspace Modules & Tab Directory" roadmap indicating the exact purpose and mechanics of each tab (`Conversations`, `Leads & CRM`, `Knowledge Base`, `Widget & Settings`).
+    - Frontend bundle validated (`npm run build`) with zero TypeScript errors.
   - [x] **Step 7.4: Agency Admin Knowledge Base Live Wiring (`/app/knowledge`)**:
     - Connected `AgencyLoginPage.tsx` to live backend tenant verification via `GET /api/v1/tenants/me`.
     - Connected `AgencyLayout.tsx` to dynamic agency branding and session logout.
@@ -218,5 +220,41 @@
   - Agency / Tenant management table with search, status toggling, credentials preview, and "Provision Agency" modal.
   - Agency-Admin (`/app/*`) layout & portal overview scaffold ready for CRM and Knowledge modules.
 
+---
 
-
+### [x] Phase 8: Multi-Tenant Auth, RBAC & Gateway Separation (COMPLETED ✅)
+- [x] **8.1 Core Security & Password Infrastructure**:
+  - Argon2id password hashing and constant-time verification (`hash_password`, `verify_password`) via `argon2-cffi`.
+  - Audience-segregated JWT issuance & decoding (`create_user_tokens`, `decode_user_token`) with explicit audience claims (`aud="platform"` vs `aud="agency"`).
+- [x] **8.2 Database Architecture & Migrations**:
+  - `UserRole` enum: `super_admin`, `agency_admin`, `agent`.
+  - `User` SQLAlchemy model with nullable `tenant_id` (cascading delete on tenant removal).
+  - Multi-tenant unique constraints: partial unique index on `email` where `tenant_id IS NULL` for platform super admins; composite unique constraint `uq_users_tenant_email` on `(tenant_id, email)` for agency members.
+  - Alembic migration `20261019_1500_6b7c8d9e0f1a_create_users_table.py` executed and verified in PostgreSQL.
+- [x] **8.3 Service Layer & Cross-Role Enforcement**:
+  - `UserRepository` providing tenant-scoped and platform-level queries.
+  - `AuthService` with discrete login pathways:
+    - Agency portal login (`authenticate_agency_user`): verifies tenant slug/credentials and strictly rejects `super_admin` attempts with `403 Forbidden`.
+    - Platform gateway login (`authenticate_platform_user`): verifies root super admin credentials and strictly rejects agency accounts with `403 Forbidden`.
+  - Refresh token rotation and user lifecycle management (`create_user`, `list_agency_users`).
+- [x] **8.4 FastAPI Endpoints & RBAC Security Guards**:
+  - `POST /api/v1/auth/login`: Agency login issuing `aud="agency"` access & refresh tokens.
+  - `POST /api/v1/auth/platform/login`: Super Admin login issuing `aud="platform"` access & refresh tokens.
+  - `POST /api/v1/auth/refresh`: Refresh token rotation with audience validation.
+  - `GET /api/v1/auth/me`: Authenticated user profile reader.
+  - `POST /api/v1/auth/users` & `GET /api/v1/auth/users`: Tenant-scoped user creation and directory listing (accessible by `agency_admin`).
+  - Guards: `require_platform_admin`, `require_agency_user`, `require_agency_admin`.
+  - Dual-auth support on `/api/v1/tenants`: Accepts either `X-Admin-Key` header or Platform Super Admin Bearer JWT.
+- [x] **8.5 Seeding & Live Verification**:
+  - Created and executed `scripts/seed_auth_users.py`:
+    - Platform Super Admin: `admin@platform.internal` / `SuperAdminPassword123!`
+    - Demo Agency Admin: `admin@prestige.com` / `AgencyAdminPassword123!`
+    - Demo Agency Agent: `agent@prestige.com` / `AgentPassword123!`
+  - Verified live cross-role rejection in both directions via PowerShell/curl.
+- [x] **8.6 Frontend Dashboard Integration**:
+  - Zustand auth store (`useAuthStore.ts`) extended with `platformToken`, `agencyToken`, `platformUser`, and `agencyUser`.
+  - Type-safe `apiClient` (`client.ts`) extended with `apiClient.auth.*` and dynamic JWT Bearer header injection with API-key fallbacks.
+  - Upgraded `PlatformLoginPage.tsx` with JWT credentials login and Super Admin badge.
+  - Upgraded `AgencyLoginPage.tsx` with work email/password login, tenant slug detection, and RBAC support.
+  - Integrated active user profile display and role badges in `SuperAdminLayout.tsx` and `AgencyLayout.tsx`.
+  - Verified `tsc -b && vite build` passed with zero errors.

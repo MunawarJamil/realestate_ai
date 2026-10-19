@@ -10,14 +10,14 @@ import {
   CheckCircle2,
   FileSpreadsheet,
   MessageSquare,
+  Users,
 } from 'lucide-react';
-import { initialLeads } from '../../mock/agencyData';
 import type { Lead, LeadStatus } from '../../types/agency';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 
 export const AgencyLeadsPage: React.FC = () => {
-  const [leads, setLeads] = useState<Lead[]>(initialLeads);
+  const [leads, setLeads] = useState<Lead[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | LeadStatus>('all');
   const [scoreFilter, setScoreFilter] = useState<'all' | 'hot' | 'warm'>('all');
@@ -195,8 +195,28 @@ export const AgencyLeadsPage: React.FC = () => {
             <tbody className="divide-y divide-white/5">
               {filteredLeads.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-zinc-500 text-xs">
-                    No leads found matching your criteria.
+                  <td colSpan={6} className="py-16 text-center text-zinc-500 text-xs">
+                    <div className="flex flex-col items-center justify-center gap-3 max-w-md mx-auto">
+                      <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-zinc-400">
+                        <Users className="w-6 h-6 text-[#F97316]" />
+                      </div>
+                      <h4 className="text-sm font-semibold text-white">No CRM Leads Captured Yet</h4>
+                      <p className="text-xs text-zinc-400 leading-relaxed">
+                        When visitors interact with your web chat widget, the AI automatically qualifies their buyer intent, captures contact info (phone, email), budget tier, and preferred properties.
+                      </p>
+                      <div className="flex items-center gap-2 pt-2">
+                        <Button variant="secondary" size="sm" onClick={() => setIsAddOpen(true)}>
+                          <Plus className="w-3.5 h-3.5 mr-1" />
+                          <span>Add Lead Manually</span>
+                        </Button>
+                        <Link to="/app/conversations">
+                          <Button variant="primary" size="sm">
+                            <MessageSquare className="w-3.5 h-3.5 mr-1" />
+                            <span>View Live Conversations</span>
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
                   </td>
                 </tr>
               ) : (

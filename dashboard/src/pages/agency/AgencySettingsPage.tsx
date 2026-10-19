@@ -12,39 +12,51 @@ import {
   ShieldCheck,
   Palette,
 } from 'lucide-react';
+import { useAuthStore } from '../../store/useAuthStore';
 import { Button } from '../../components/ui/Button';
 
 export const AgencySettingsPage: React.FC = () => {
+  const tenant = useAuthStore((s) => s.tenant);
+  const agencyName = tenant?.name || 'Agency';
+
   // Widget Customization States
-  const [assistantName, setAssistantName] = useState('Apex Luxury Concierge');
-  const [welcomeGreeting, setWelcomeGreeting] = useState(
-    'Welcome to Apex Luxury Properties. How may I assist you with our luxury waterfront villas or Downtown penthouses today?'
+  const [assistantName, setAssistantName] = useState(
+    tenant ? `${tenant.name} AI Concierge` : 'AI Property Concierge'
   );
-  const [accentColor, setAccentColor] = useState('#F97316'); // Default luxury orange
+  const [welcomeGreeting, setWelcomeGreeting] = useState(
+    tenant
+      ? `Welcome to ${tenant.name}. How may I assist you with property inquiries, pricing, or viewing schedules today?`
+      : 'Welcome! How may I assist you with property inquiries or viewings today?'
+  );
+  const [accentColor, setAccentColor] = useState('#F97316'); // Default brand orange
   const [quickPrompts, setQuickPrompts] = useState([
-    'Palm Jumeirah Signature Villas',
-    'Downtown Sky Residences ROI',
-    'Book Private VIP Viewing',
+    'Available Properties & Pricing',
+    'Schedule a Private Viewing',
+    'Payment Plans & ROI',
   ]);
   const [newPromptInput, setNewPromptInput] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Agency Whitelist credentials
-  const widgetKey = 'wk_live_b21e89f03c4a71d2';
-  const allowedDomains = ['apexproperties.ae', 'localhost:5173'];
+  // Agency Whitelist credentials from authenticated tenant
+  const widgetKey = tenant?.widget_key || 'wk_live_not_configured';
+  const tenantSlug = tenant?.slug || 'agency';
+  const allowedDomains =
+    tenant?.allowed_domains && tenant.allowed_domains.length > 0
+      ? tenant.allowed_domains
+      : ['* (All domains allowed)'];
 
   const colorOptions = [
-    { label: 'Apex Amber (Default)', hex: '#F97316' },
+    { label: 'Agency Amber (Default)', hex: '#F97316' },
     { label: 'Emerald Mint', hex: '#10B981' },
     { label: 'Royal Gold', hex: '#EAB308' },
     { label: 'Azure Blue', hex: '#3B82F6' },
   ];
 
   const embedScript = `<script
-  src="https://cdn.realestate-ai.com/widget.js"
+  src="http://localhost:5173/widget.js"
   data-widget-key="${widgetKey}"
-  data-tenant-slug="apex-luxury"
+  data-tenant-slug="${tenantSlug}"
   async>
 </script>`;
 
@@ -89,9 +101,12 @@ export const AgencySettingsPage: React.FC = () => {
             <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
               Widget Settings
             </h2>
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-[#F97316]/10 text-[#F97316] border border-[#F97316]/20">
+              {agencyName}
+            </span>
           </div>
           <p className="text-xs text-zinc-400 mt-1">
-            Persona, greeting, brand accent, and website embed snippet.
+            Persona, greeting, brand accent, and website embed snippet for {agencyName}.
           </p>
         </div>
 
@@ -319,7 +334,7 @@ export const AgencySettingsPage: React.FC = () => {
                   className="p-3 rounded-2xl rounded-tr-sm text-white leading-relaxed max-w-[85%] shadow-sm"
                   style={{ backgroundColor: accentColor }}
                 >
-                  Do you have any 4-bedroom beachfront villas available on Palm Jumeirah?
+                  What properties or investment opportunities are currently available?
                 </div>
               </div>
 
@@ -327,7 +342,7 @@ export const AgencySettingsPage: React.FC = () => {
               <div className="flex flex-col items-start space-y-1">
                 <span className="text-[10px] text-zinc-500 ml-1">{assistantName}</span>
                 <div className="p-3 rounded-2xl rounded-tl-sm bg-[#1E1E21] border border-white/8 text-zinc-200 leading-relaxed max-w-[90%]">
-                  Yes, we have Signature Villas on Frond N featuring 4 & 5-bedroom layouts with private beach access and infinity pools.
+                  We have premium developments available with high ROI and flexible payment plans. You can schedule a private viewing or ask about specific floor plans and brochures!
                 </div>
               </div>
 

@@ -648,9 +648,40 @@ export const AgencyConversationsPage: React.FC = () => {
             </form>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-zinc-500 text-xs">
-            <MessageSquare className="w-10 h-10 text-zinc-700 mb-2" />
-            <p>Select a conversation from the left pane to view live messages.</p>
+          <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10 text-center max-w-lg mx-auto">
+            <div className="w-14 h-14 rounded-2xl bg-[#F97316]/10 border border-[#F97316]/20 flex items-center justify-center text-[#F97316] mb-4 shadow-lg shadow-[#F97316]/10">
+              <MessageSquare className="w-7 h-7" />
+            </div>
+            <h3 className="text-base sm:text-lg font-bold text-white mb-1.5">
+              Live Inquiries & Conversation Stream
+            </h3>
+            <p className="text-xs text-zinc-400 leading-relaxed mb-6">
+              This inbox monitors live visitor chats from your website widget. Each visitor inquiry streams in real-time with grounded citations and lead qualification.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full text-left mb-6">
+              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
+                <span className="text-[11px] font-semibold text-white flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-[#F97316]" /> Real-time Streaming
+                </span>
+                <p className="text-[11px] text-zinc-400">
+                  Token-by-token SSE streaming for visitor inquiries and agent replies.
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
+                <span className="text-[11px] font-semibold text-white flex items-center gap-1.5">
+                  <Bot className="w-3.5 h-3.5 text-blue-400" /> Grounded RAG Answers
+                </span>
+                <p className="text-[11px] text-zinc-400">
+                  AI answers strictly from documents in your agency's Knowledge Base.
+                </p>
+              </div>
+            </div>
+
+            <Button variant="primary" size="md" onClick={handleCreateNewConversation}>
+              <Plus className="w-4 h-4 mr-1.5" />
+              <span>Launch Test Inquiry</span>
+            </Button>
           </div>
         )}
       </div>

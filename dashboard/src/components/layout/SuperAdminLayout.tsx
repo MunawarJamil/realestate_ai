@@ -19,7 +19,8 @@ export const SuperAdminLayout: React.FC = () => {
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
   const navigate = useNavigate();
-  const clearAdminKey = useAuthStore((s) => s.clearAdminKey);
+  const clearPlatformAuth = useAuthStore((s) => s.clearPlatformAuth);
+  const platformUser = useAuthStore((s) => s.platformUser);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Auto-close mobile drawer on route change
@@ -28,7 +29,7 @@ export const SuperAdminLayout: React.FC = () => {
   }, [currentPath]);
 
   const handleLogout = () => {
-    clearAdminKey();
+    clearPlatformAuth();
     navigate({ to: '/platform/login' });
   };
 
@@ -194,8 +195,20 @@ export const SuperAdminLayout: React.FC = () => {
             <span className="hidden sm:inline-block text-xs text-zinc-400 bg-zinc-900 border border-white/5 px-2.5 py-1 rounded-md">
               Env: <strong className="text-white">Production V1</strong>
             </span>
-            <div className="w-8 h-8 rounded-full bg-zinc-800 border border-white/10 flex items-center justify-center text-xs font-semibold text-zinc-300">
-              SA
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-[#F97316]/20 border border-[#F97316]/40 flex items-center justify-center text-xs font-semibold text-[#F97316]">
+                {platformUser ? platformUser.full_name.slice(0, 2).toUpperCase() : 'SA'}
+              </div>
+              {platformUser && (
+                <div className="hidden md:flex flex-col text-left">
+                  <span className="text-xs font-medium text-zinc-200 leading-tight">
+                    {platformUser.full_name}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 leading-tight">
+                    {platformUser.email}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </header>

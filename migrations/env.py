@@ -10,6 +10,7 @@ from app.db.base import Base
 from app.modules.tenants.models import Tenant  # Import Tenant model for autogenerate migrations 
 from app.modules.knowledge.models import KnowledgeDocument
 from app.modules.chat.models import Conversation, Message
+from app.modules.auth.models import User
 config = context.config
 # Escaping % in database url because it is used in postgres connection string
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
