@@ -25,6 +25,16 @@ HandoffReason = Literal[
     "timeout",
 ]
 
+# Replace or add the IntentType literal:
+IntentType = Literal[
+    "greeting",
+    "smalltalk",
+    "property_inquiry",
+    "handoff_requested",
+    "live_human_support",
+]
+
+
 ConversationChannel = Literal["web", "mobile", "whatsapp", "email"]
 
 
@@ -76,11 +86,9 @@ class AgentState(TypedDict):
 
     # 7. Free-form metadata (merged, not overwritten)
     metadata: Annotated[NotRequired[dict[str, Any]], merge_dicts]
-
-# ==============================================================================
-# Factories
-# ==============================================================================
-
+ 
+ 
+ # Factories 
 
 def make_initial_state(
     *,
@@ -109,25 +117,12 @@ def make_initial_state(
         metadata=metadata or {},
     )
 
-
 def make_turn_input(
     *,
     message: BaseMessage,
     status: GraphStatus,
     assigned_agent_id: str | uuid.UUID | None = None,
 ) -> dict[str, Any]:
-    """
-    Build the input for every turn AFTER the first one.
-
-    - `status` and `assigned_agent_id` come from the DB (source of truth).
-    - Per-turn fields are reset so values from the previous turn don't leak.
-    - History, ai_failure_count and handoff fields are kept by the checkpointer.
-
-    Usage:
-        update = make_turn_input(message=HumanMessage(content="..."), status=conv.status)
-        config = {"configurable": {"thread_id": str(conv.id)}}
-        await graph.ainvoke(update, config=config)
-    """
     return {
         "messages": [message],
         "status": status,
@@ -141,10 +136,7 @@ def make_turn_input(
     }
 
 
-# ==============================================================================
 # Public exports
-# ==============================================================================
-
 __all__ = [
     "AgentState",
     "GraphStatus",

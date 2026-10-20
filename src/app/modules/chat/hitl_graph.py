@@ -24,8 +24,94 @@ from app.modules.chat.handoff import HANDOFF_GUARDRAIL_REPLY, detect_handoff_req
 from app.modules.chat.prompts import build_chat_messages
 from app.modules.knowledge.retrieval import RetrievedChunk
 
+
 if TYPE_CHECKING:
     from redis.asyncio import Redis
+
+
+# 12e improvements
+
+import re
+
+# High-frequency multilingual greetings, small-talk, acknowledgments & bot identity inquiries
+_SMALLTALK_EXACT = {
+    # English greetings & pleasantries
+    "hello", "hi", "hey", "hiya", "howdy", "good morning", "good afternoon",
+    "good evening", "greetings", "welcome", "thanks", "thank you", "thx", "ty",
+    "bye", "goodbye", "cya", "see you", "have a good day",
+    # Arabic greetings & pleasantries
+    "salam", "assalam alaikum", "marhaba", "ahlan", "hala", "shukran", "ahlan wa sahlan",
+    # Roman Urdu / Hindi
+    "kya hal hai", "kaise ho", "shukriya", "adaab",
+    # Common conversational fillers / acknowledgments
+    "ok", "okay", "sure", "got it", "understood", "waiting", "i am waiting",
+    "yes", "no", "cool", "great", "nice", "fine",
+    # Bot capability / identity
+    "who are you", "what are you", "what can you do", "help", "are you ai",
+    "are you a bot", "are you a human", "can you help me", "how does this work",
+}
+
+_SMALLTALK_PATTERNS = [
+    re.compile(r"^(hi|hello|hey|salam|marhaba|hola)\b", re.IGNORECASE),
+    re.compile(r"\b(how are you|how's it going|who are you|what can you do)\b", re.IGNORECASE),
+    re.compile(r"^(thank you|thanks|good morning|good evening|good afternoon)\b", re.IGNORECASE),
+    re.compile(r"^(ok|okay|waiting|still waiting)\b", re.IGNORECASE),
+]
+
+_REAL_ESTATE_SIGNALS = [
+    re.compile(
+        r"\b(villa|apartment|flat|penthouse|studio|duplex|land|plot|commercial|office|building)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(buy|rent|sale|purchase|invest|lease|price|cost|budget|jod|usd|aed|dollar|sqm|sqft|bedroom|bhk|bath)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(amman|aqaba|dabouq|abdoun|deir ghbar|swifieh|khalda|jubeiha|viewing|tour|listing|catalog)\b",
+        re.IGNORECASE,
+    ),
+]
+
+
+def classify_visitor_intent(text: str) -> Literal["smalltalk", "property_inquiry"]:
+    """
+    Production-grade, zero-latency intent classifier.
+    
+    1. If message strongly contains real-estate domain signals -> property_inquiry.
+    2. If message matches greeting, filler, or bot-identity patterns -> smalltalk.
+    3. If uncertain -> defaults to property_inquiry (RAG flow with full safety).
+    """
+    clean = re.sub(r"[^\w\s]", " ", text).strip().lower()
+    single_spaced = " ".join(clean.split())
+
+    if not single_spaced:
+        return "smalltalk"
+
+    # 1. Check for explicit property signals first
+    for pattern in _REAL_ESTATE_SIGNALS:
+        if pattern.search(single_spaced):
+            return "property_inquiry"
+
+    # 2. Check exact smalltalk dictionary
+    if single_spaced in _SMALLTALK_EXACT:
+        return "smalltalk"
+
+    # 3. Check regex pattern prefixes
+    for pattern in _SMALLTALK_PATTERNS:
+        if pattern.search(single_spaced):
+            return "smalltalk"
+
+    # 4. Short casual messages (<= 3 words) without property signals
+    words = single_spaced.split()
+    if len(words) <= 2 and words[0] in {"hi", "hello", "hey", "salam", "thanks", "ok", "waiting"}:
+        return "smalltalk"
+
+    # 5. Default fallback: keep normal RAG flow
+    return "property_inquiry"
+
+# 12e improvements ended
+
 
 logger = logging.getLogger(__name__)
 
@@ -167,10 +253,7 @@ def _handoff_updates(reason: str) -> dict[str, Any]:
         "handoff_notice_sent": False,
     }
 
-
-# ==============================================================================
 # Node 1: Intent & Lifecycle Router (includes the 5-minute inactivity check)
-# ==============================================================================
 
 
 def make_intent_router_node(cfg: HitlConfig = DEFAULT_CONFIG):
@@ -180,7 +263,6 @@ def make_intent_router_node(cfg: HitlConfig = DEFAULT_CONFIG):
         updates: dict[str, Any] = {}
 
         if status == "resolved":
-            # Visitor wrote again after resolution -> reopen with AI.
             logger.info("Reopening resolved conversation", extra=_log_ctx(state))
             updates = _ai_reclaim_updates()
             status = "ai"
@@ -190,7 +272,6 @@ def make_intent_router_node(cfg: HitlConfig = DEFAULT_CONFIG):
                 state.get("handoff_requested_at")
             )
             if last_activity is None:
-                # Agent assigned but no clock yet: start it now, stay silent.
                 return {
                     "requires_human": True,
                     "intent": "live_human_support",
@@ -198,11 +279,7 @@ def make_intent_router_node(cfg: HitlConfig = DEFAULT_CONFIG):
                 }
             idle = (now - last_activity).total_seconds()
             if idle >= cfg.human_inactivity_timeout:
-                logger.info(
-                    "Human agent idle %.0fs, AI reclaiming conversation",
-                    idle,
-                    extra=_log_ctx(state),
-                )
+                logger.info("Human agent idle %.0fs, AI reclaiming conversation", idle, extra=_log_ctx(state))
                 updates = _ai_reclaim_updates()
                 status = "ai"
             else:
@@ -212,21 +289,18 @@ def make_intent_router_node(cfg: HitlConfig = DEFAULT_CONFIG):
             requested_at = _parse_ts(state.get("handoff_requested_at"))
             waited = (now - requested_at).total_seconds() if requested_at else 0.0
             if requested_at and waited >= cfg.unclaimed_handoff_timeout:
-                logger.info(
-                    "Handoff unclaimed for %.0fs, AI reclaiming conversation",
-                    waited,
-                    extra=_log_ctx(state),
-                )
+                logger.info("Handoff unclaimed for %.0fs, AI reclaiming conversation", waited, extra=_log_ctx(state))
                 updates = _ai_reclaim_updates()
                 status = "ai"
             else:
                 return {"requires_human": True, "intent": "live_human_support"}
 
-        # status == "ai" (originally, or just reclaimed): check for a new handoff request
+        # status == "ai" (originally, or just reclaimed)
         messages = state.get("messages", [])
         idx = _last_human_index(messages)
         last_text = str(messages[idx].content) if idx is not None else ""
 
+        # Check for handoff request
         if detect_handoff_request(last_text, state.get("metadata", {})):
             return {
                 **updates,
@@ -234,15 +308,67 @@ def make_intent_router_node(cfg: HitlConfig = DEFAULT_CONFIG):
                 "intent": "handoff_requested",
             }
 
-        return {**updates, "requires_human": False, "intent": "property_inquiry"}
+        # Classify between smalltalk and property_inquiry
+        intent = classify_visitor_intent(last_text)
+        return {
+            **updates,
+            "requires_human": False,
+            "intent": intent,
+        }
 
     return intent_router_node
 
 
-# ==============================================================================
-# Node 2: Human Review (HITL silence / one-time notice)
-# ==============================================================================
+SMALLTALK_SYSTEM_PROMPT = """You are a helpful, courteous, and professional AI Assistant for a premier real estate agency.
+Your role in this turn is to greet the visitor, acknowledge their comment, or clarify your role.
+- Be polite, warm, concise, and professional (max 2-3 sentences).
+- If the visitor is greeting you, welcome them and invite them to ask about available properties, locations, or pricing.
+- If the visitor is waiting for an advisor, reassure them politely and offer to answer any preliminary questions while they wait.
+- CRITICAL: Do NOT invent, assume, or list specific property names, addresses, or prices in small-talk mode."""
 
+
+def make_smalltalk_node(llm: LLMProvider, cfg: HitlConfig = DEFAULT_CONFIG):
+    async def smalltalk_node(state: AgentState) -> dict[str, Any]:
+        ctx = _log_ctx(state)
+        messages = state.get("messages", [])
+        idx = _last_human_index(messages)
+        query = str(messages[idx].content) if idx is not None else "Hello"
+
+        history_msgs = _to_llm_history(messages, idx, limit=4) if idx is not None else []
+        prompt_messages = [
+            ChatMessage(role="system", content=SMALLTALK_SYSTEM_PROMPT),
+            *history_msgs,
+            ChatMessage(role="user", content=query),
+        ]
+
+        try:
+            # Low max_tokens to preserve speed and avoid cost
+            resp = await _call_with_retry(
+                lambda: llm.complete(prompt_messages, max_tokens=150, temperature=0.6),
+                timeout=cfg.llm_timeout,
+                retries=1,
+            )
+            reply = (resp.content or "").strip()
+            if not reply:
+                reply = "Hello! Welcome to our agency. How can I assist you with properties or pricing today?"
+        except Exception:
+            logger.exception("Small-talk generation failed, using fallback", extra=ctx)
+            reply = "Hello! Welcome to our agency. How can I assist you with your property search today?"
+
+        return {
+            "context_chunks": [],
+            "retrieval_failed": False,
+            "ai_failure_count": 0,
+            "reply_content": reply,
+            "messages": [AIMessage(content=reply)],
+        }
+
+    return smalltalk_node
+
+
+
+
+# Node 2: Human Review (HITL silence / one-time notice)
 
 async def human_review_node(state: AgentState) -> dict[str, Any]:
     """Human agent active -> AI silent. Handoff notice is sent only ONCE."""
@@ -352,18 +478,18 @@ def make_rag_node(
     return rag_node
 
 
-# ==============================================================================
+
 # Conditional edge
-# ==============================================================================
+
+def route_next_step(state: AgentState) -> Literal["human_review", "smalltalk_agent", "rag_agent"]:
+    if state.get("requires_human", False):
+        return "human_review"
+    if state.get("intent") == "smalltalk":
+        return "smalltalk_agent"
+    return "rag_agent"
 
 
-def route_next_step(state: AgentState) -> Literal["human_review", "rag_agent"]:
-    return "human_review" if state.get("requires_human", False) else "rag_agent"
-
-
-# ==============================================================================
 # Graph builder: call ONCE at app startup, reuse for all requests
-# ==============================================================================
 
 
 def build_hitl_graph(
@@ -375,26 +501,28 @@ def build_hitl_graph(
     if checkpointer is None:
         logger.warning("No checkpointer given, using in-memory MemorySaver (DEV ONLY)")
         checkpointer = MemorySaver()
-
     workflow: StateGraph = StateGraph(cast(Any, AgentState))
     workflow.add_node("intent_router", make_intent_router_node(cfg))
     workflow.add_node("human_review", human_review_node)
+    workflow.add_node("smalltalk_agent", make_smalltalk_node(llm, cfg))
     workflow.add_node("rag_agent", make_rag_node(llm, retrieval_service, cfg))
-
     workflow.add_edge(START, "intent_router")
     workflow.add_conditional_edges(
         "intent_router",
         route_next_step,
-        {"human_review": "human_review", "rag_agent": "rag_agent"},
+        {
+            "human_review": "human_review",
+            "smalltalk_agent": "smalltalk_agent",
+            "rag_agent": "rag_agent",
+        },
     )
     workflow.add_edge("human_review", END)
+    workflow.add_edge("smalltalk_agent", END)
     workflow.add_edge("rag_agent", END)
     return workflow.compile(checkpointer=checkpointer)
 
 
-# ==============================================================================
 # Runtime helpers: thread config, per-conversation lock, running a turn
-# ==============================================================================
 
 
 def build_thread_config(
