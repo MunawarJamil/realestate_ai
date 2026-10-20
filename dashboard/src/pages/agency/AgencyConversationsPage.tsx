@@ -88,9 +88,6 @@ export const AgencyConversationsPage: React.FC = () => {
   const [liveHandoffAlert, setLiveHandoffAlert] = useState<{ conversation_id: string; snippet: string } | null>(null);
   const agentWsRef = useRef<AgentSocketClient | null>(null);
 
-  // Real-time SSE streaming state
-  const [isStreaming, setIsStreaming] = useState(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToBottom = () => {
@@ -230,7 +227,7 @@ export const AgencyConversationsPage: React.FC = () => {
   }, [selectedId, loadMessages]);
 
 
-  
+
   const selectedConv = conversations.find((c) => c.id === selectedId) || null;
 
   const filteredConversations = conversations.filter((c) => {
@@ -331,10 +328,12 @@ export const AgencyConversationsPage: React.FC = () => {
     }
   };
 
-  // 4. Send Message (Live Human Agent or AI Stream Test)
+  // 4. Send Message (Strictly Human Agent Reply)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!replyText.trim() || !selectedConv || isStreaming) return;
+    if (!replyText.trim() || !selectedConv) return;
+    // Guard: Resolved conversations cannot receive replies without explicit re-opening
+    if (selectedConv.status === 'resolved') return;
 
     const messageContent = replyText.trim();
     setReplyText('');
@@ -344,139 +343,58 @@ export const AgencyConversationsPage: React.FC = () => {
       minute: '2-digit',
     });
 
-    // # 12b HITL - If in Human Active mode, send live broker message
-    if (selectedConv.status === 'human_active') {
-      const tempAgentMsgId = `agt-${Date.now()}`;
-      const agentMsg: Message = {
-        id: tempAgentMsgId,
-        role: 'user', // UI right alignment
-        sender_type: 'agent',
-        content: messageContent,
-        created_at: timestampStr,
-      };
-
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === selectedConv.id
-            ? {
-                ...c,
-                last_message_at: timestampStr,
-                messages: [...c.messages, agentMsg],
-              }
-            : c
-        )
-      );
-      setTimeout(scrollToBottom, 40);
-
-      // Prefer WebSocket dispatch
-      if (agentWsRef.current?.isConnected()) {
-        const ok = agentWsRef.current.sendMessage(selectedConv.id, messageContent);
-        if (ok) return;
-      }
-
-      // Fallback to REST
+    // If currently 'ai' or 'handoff_requested', claim conversation to transition to human_active
+    if (selectedConv.status !== 'human_active') {
       try {
-        await apiClient.agency.sendMessage(selectedConv.id, messageContent);
-      } catch (err: unknown) {
-        console.error('Failed to send agent message:', err);
-        showNotification('Failed to deliver message to visitor.');
+        await apiClient.agency.claimConversation(selectedConv.id);
+        setConversations((prev) =>
+          prev.map((c) => (c.id === selectedConv.id ? { ...c, status: 'human_active' } : c))
+        );
+      } catch (err) {
+        console.warn('Auto-claim on send failed, attempting direct send:', err);
       }
-      return;
     }
 
-    // Otherwise, simulate/test AI assistant streaming reply
-    const tempUserMsgId = `usr-${Date.now()}`;
-    const tempAssistantMsgId = `ast-${Date.now()}`;
-
-    const userMessage: Message = {
-      id: tempUserMsgId,
-      role: 'user',
+    // Optimistic UI update for immediate feedback
+    const tempAgentMsgId = `agt-${Date.now()}`;
+    const agentMsg: Message = {
+      id: tempAgentMsgId,
+      role: 'user', // UI right-alignment
+      sender_type: 'agent',
       content: messageContent,
       created_at: timestampStr,
     };
 
-    const emptyAssistantMessage: Message = {
-      id: tempAssistantMsgId,
-      role: 'assistant',
-      content: '',
-      created_at: timestampStr,
-      grounded_sources: ['Qdrant Knowledge Chunks'],
-    };
-
-    // Optimistically update conversation state
     setConversations((prev) =>
       prev.map((c) =>
         c.id === selectedConv.id
           ? {
               ...c,
+              status: 'human_active',
               last_message_at: timestampStr,
-              messages: [...c.messages, userMessage, emptyAssistantMessage],
+              messages: [...c.messages, agentMsg],
             }
           : c
       )
     );
 
     setTimeout(scrollToBottom, 40);
-    setIsStreaming(true);
 
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
+    // Prefer Real-time Socket.IO dispatch
+    if (agentWsRef.current?.isConnected()) {
+      const ok = agentWsRef.current.sendMessage(selectedConv.id, messageContent);
+      if (ok) return;
+    }
 
+    // Fallback to REST endpoint
     try {
-      let accumulatedText = '';
-
-      await apiClient.agency.streamMessage(selectedConv.id, messageContent, {
-        signal: abortController.signal,
-        onToken: (token: string) => {
-          accumulatedText += token;
-          setConversations((prev) =>
-            prev.map((c) =>
-              c.id === selectedConv.id
-                ? {
-                    ...c,
-                    messages: c.messages.map((m) =>
-                      m.id === tempAssistantMsgId
-                        ? { ...m, content: accumulatedText }
-                        : m
-                    ),
-                  }
-                : c
-            )
-          );
-          scrollToBottom();
-        },
-        onDone: () => {
-          setIsStreaming(false);
-          abortControllerRef.current = null;
-        },
-        onError: (err: Error) => {
-          console.error('SSE Stream error:', err);
-          setIsStreaming(false);
-          setConversations((prev) =>
-            prev.map((c) =>
-              c.id === selectedConv.id
-                ? {
-                    ...c,
-                    messages: c.messages.map((m) =>
-                      m.id === tempAssistantMsgId
-                        ? {
-                            ...m,
-                            content:
-                              m.content ||
-                              'Sorry, an error occurred while streaming the assistant reply.',
-                          }
-                        : m
-                    ),
-                  }
-                : c
-            )
-          );
-        },
-      });
-    } catch {
-      setIsStreaming(false);
+      await apiClient.agency.sendMessage(selectedConv.id, messageContent);
+    } catch (err: unknown) {
+      console.error('Failed to deliver agent message:', err);
+      showNotification('Failed to deliver message to visitor.');
     }
   };
+
 
   return (
     <div className="h-[calc(100dvh-10.5rem)] min-h-[480px] flex flex-col space-y-3 sm:space-y-4 max-w-7xl mx-auto mb-4">
@@ -942,11 +860,6 @@ export const AgencyConversationsPage: React.FC = () => {
                       >
                         {msg.content ? (
                           <p className="whitespace-pre-wrap">{msg.content}</p>
-                        ) : isAssistant && isStreaming ? (
-                          <div className="flex items-center gap-1.5 text-zinc-400 italic">
-                            <Sparkles className="w-3.5 h-3.5 text-[#F97316] animate-spin" />
-                            <span>Streaming assistant response...</span>
-                          </div>
                         ) : null}
 
                         {/* Grounded Citation */}
@@ -976,40 +889,57 @@ export const AgencyConversationsPage: React.FC = () => {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Agent Reply Bar */}
-            <form
-              onSubmit={handleSendMessage}
-              className="p-3 sm:p-3.5 border-t border-white/8 bg-[#121215] flex items-center gap-2 sm:gap-3 shrink-0"
-            >
-              <input
-                type="text"
-                value={replyText}
-                onChange={(e) => setReplyText(e.target.value)}
-                disabled={isStreaming}
-                placeholder={
-                  selectedConv.status === 'human_active'
-                    ? 'Type a message to reply live to the visitor (WebSocket)...'
-                    : isStreaming
-                    ? 'AI assistant is streaming reply...'
-                    : 'Type a prompt to test conversational AI stream...'
-                }
-                className="flex-1 px-3.5 py-2 sm:py-2.5 bg-[#0B0B0D] border border-white/10 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#F97316] disabled:opacity-50"
-              />
-              <Button type="submit" variant="primary" size="md" disabled={isStreaming || !replyText.trim()}>
-                {isStreaming ? (
-                  <Sparkles className="w-3.5 h-3.5 animate-spin mr-1" />
-                ) : (
+            {/* Agent Reply Bar or Resolved Read-Only Banner */}
+            {selectedConv.status === 'resolved' ? (
+              <div className="p-3 sm:p-3.5 border-t border-white/8 bg-[#101013] flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-2 text-xs text-zinc-400">
+                  <CheckCircle2 className="w-4 h-4 text-zinc-500 shrink-0" />
+                  <span>
+                    This inquiry is <strong>Resolved</strong> (read-only mode). Re-open to message the visitor.
+                  </span>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleClaimConversation}
+                  className="bg-white/5 hover:bg-white/10 text-white shrink-0 self-end sm:self-auto cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
+                  <span>Re-open Conversation</span>
+                </Button>
+              </div>
+            ) : (
+              <form
+                onSubmit={handleSendMessage}
+                className="p-3 sm:p-3.5 border-t border-white/8 bg-[#121215] flex items-center gap-2 sm:gap-3 shrink-0"
+              >
+                <input
+                  type="text"
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  placeholder={
+                    selectedConv.status === 'human_active'
+                      ? 'Type a message to reply live to the visitor...'
+                      : selectedConv.status === 'handoff_requested'
+                      ? 'Reply to claim and join live conversation with visitor...'
+                      : 'Reply to take over conversation from AI...'
+                  }
+                  className="flex-1 px-3.5 py-2 sm:py-2.5 bg-[#0B0B0D] border border-white/10 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#F97316]"
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="md"
+                  disabled={!replyText.trim()}
+                  className="shrink-0 cursor-pointer"
+                >
                   <Send className="w-3.5 h-3.5 mr-1" />
-                )}
-                <span>
-                  {isStreaming
-                    ? 'Streaming...'
-                    : selectedConv.status === 'human_active'
-                    ? 'Reply to Visitor'
-                    : 'Send'}
-                </span>
-              </Button>
-            </form>
+                  <span>
+                    {selectedConv.status === 'human_active' ? 'Reply' : 'Claim & Reply'}
+                  </span>
+                </Button>
+              </form>
+            )}
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-10 text-center max-w-lg mx-auto">
