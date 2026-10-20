@@ -7,14 +7,16 @@ import { createWidgetContainer, WidgetElements } from './container';
 import { renderMarkdown } from './markdown';
 import { WidgetStorage } from './storage';
 import { ChatMessage, RealEstateAIWindowAPI, WidgetConfig, WidgetState } from './types';
-import { WidgetWebSocketClient } from './ws'; // # 12b HITL
+import { WidgetSocketClient } from './socket'; // # 12c HITL
 
 class RealEstateWidgetController {
   private config: WidgetConfig;
   private elements: WidgetElements | null = null;
   private storage: WidgetStorage;
   private api: WidgetApiClient;
-  private wsClient: WidgetWebSocketClient | null = null; // # 12b HITL
+  private socketClient: WidgetSocketClient | null = null; // # 12c HITL
+
+
   private activeStreamingBubble: HTMLDivElement | null = null; // # 12b HITL
   private accumulatedStreamContent = ''; // # 12b HITL
   private state: WidgetState;
@@ -214,29 +216,20 @@ class RealEstateWidgetController {
     }
   }
 
-  // # 12b HITL - Dual-Engine Real-time WebSocket Gateway
+  // # 12c HITL - Socket.IO Real-Time Gateway
   private initWebSocket(): void {
     if (!this.state.session || !this.state.conversationId) return;
-    if (this.wsClient && this.wsClient.isConnected()) return;
+    if (this.socketClient && this.socketClient.isConnected()) return;
 
-    if (this.wsClient) {
-      this.wsClient.disconnect();
+    if (this.socketClient) {
+      this.socketClient.disconnect();
     }
 
-    this.wsClient = new WidgetWebSocketClient(
+    this.socketClient = new WidgetSocketClient(
       this.config.apiUrl,
       this.state.session.visitor_token,
       this.state.conversationId,
       {
-        onToken: (chunk: string) => {
-          if (!this.activeStreamingBubble) {
-            this.hideTypingIndicator();
-            this.activeStreamingBubble = this.createMessageBubble('assistant');
-          }
-          this.accumulatedStreamContent += chunk;
-          this.activeStreamingBubble.innerHTML = renderMarkdown(this.accumulatedStreamContent);
-          this.scrollToBottom();
-        },
         onMessage: (msg: ChatMessage) => {
           this.hideTypingIndicator();
           this.state.isStreaming = false;
@@ -245,40 +238,27 @@ class RealEstateWidgetController {
             this.elements.input.focus();
           }
 
-          // If completing AI streaming chunk collection
-          if (msg.role === 'assistant' && this.activeStreamingBubble) {
-            this.state.messages.push({
-              ...msg,
-              content: this.accumulatedStreamContent || msg.content,
-            });
-            this.activeStreamingBubble = null;
-            this.accumulatedStreamContent = '';
+          // Avoid duplicate rendering of visitor's own messages
+          if (msg.role === 'user' && msg.sender_type === 'visitor') {
             return;
           }
 
-          // Avoid duplicate user message rendering
-          if (msg.role === 'user') {
-            return;
-          }
-
-          // Avoid duplicate message rendering if already in state
+          // Avoid duplicate message if already in state
           if (this.state.messages.some((m) => m.id === msg.id)) {
             return;
           }
 
           this.appendMessage(msg, true);
         },
-        onStatusChange: (status: 'ai' | 'handoff_requested' | 'human_active' | 'resolved') => {
-          this.updateStatusBadge(status);
-        },
         onError: (err: Error) => {
-          console.warn('[RealEstateAI Widget] Real-time WS notice:', err);
+          console.warn('[RealEstateAI Widget] Socket.IO notice:', err);
         },
       }
     );
 
-    this.wsClient.connect();
+    this.socketClient.connect();
   }
+
 
   // # 12b HITL - Header Live Status Badge
   private updateStatusBadge(status: 'ai' | 'handoff_requested' | 'human_active' | 'resolved'): void {
@@ -343,22 +323,21 @@ class RealEstateWidgetController {
     this.activeStreamingBubble = null;
     this.accumulatedStreamContent = '';
 
-    // # 12b HITL - Prefer Real-time WebSocket connection
-    if (this.wsClient && this.wsClient.isConnected()) {
-      const dispatched = this.wsClient.sendMessage(text);
+    // # 12c HITL - Real-Time Socket.IO Dispatch
+    if (this.socketClient && this.socketClient.isConnected()) {
+      const dispatched = this.socketClient.sendMessage(text);
       if (dispatched) {
-        // When chatting with a live advisor or waiting in queue, do not display AI streaming typing indicator
-        if (this.state.status === 'human_active' || this.state.status === 'handoff_requested') {
-          this.hideTypingIndicator();
-          this.state.isStreaming = false;
-          if (this.elements) {
-            this.elements.sendBtn.disabled = this.elements.input.value.trim().length === 0;
-            this.elements.input.focus();
-          }
+        this.hideTypingIndicator();
+        this.state.isStreaming = false;
+        if (this.elements) {
+          this.elements.sendBtn.disabled = this.elements.input.value.trim().length === 0;
+          this.elements.input.focus();
         }
         return;
       }
     }
+
+
 
     // Fallback to HTTP SSE Stream
     let assistantBubble: HTMLDivElement | null = null;

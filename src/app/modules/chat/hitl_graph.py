@@ -1,0 +1,485 @@
+# 12d HITL - Production-Grade LangGraph Orchestrator for RealEstate AI
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
+import logging
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+import uuid
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
+from redis.exceptions import LockError
+
+from app.integrations.llm.base import ChatMessage, LLMProvider
+from app.modules.chat.graph_state import AgentState, utc_now_iso
+from app.modules.chat.handoff import HANDOFF_GUARDRAIL_REPLY, detect_handoff_request
+from app.modules.chat.prompts import build_chat_messages
+from app.modules.knowledge.retrieval import RetrievedChunk
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
+
+logger = logging.getLogger(__name__)
+
+HUMAN_AGENT_NAME = "human_agent"
+
+LLM_FALLBACK_REPLY = (
+    "Sorry, I'm having a little trouble right now. Please try again in a moment."
+)
+NO_CONTEXT_REPLY = (
+    "I couldn't find verified information about that. "
+    "Would you like me to connect you with one of our advisors?"
+)
+
+
+# ==============================================================================
+# Config (all tunables in one place, injectable for tests)
+# ==============================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class HitlConfig:
+    human_inactivity_timeout: float = 300.0   # 5 min: agent silent -> AI takes back
+    unclaimed_handoff_timeout: float = 600.0  # 10 min: nobody accepted handoff -> AI takes back
+    max_ai_failures: int = 3                  # consecutive failures -> handoff to human
+    max_history_messages: int = 20            # messages sent to LLM (state keeps everything)
+    retrieval_timeout: float = 10.0
+    llm_timeout: float = 30.0
+    llm_retries: int = 1
+    require_grounding: bool = True            # no knowledge chunks -> don't let LLM guess
+    lock_ttl: int = 60                        # seconds, per-conversation Redis lock
+    lock_wait: int = 15
+
+
+DEFAULT_CONFIG = HitlConfig()
+
+
+# ==============================================================================
+# Dependencies (Protocols so clients are injected, not rebuilt per turn)
+# ==============================================================================
+
+
+class SearchService(Protocol):
+    """Protocol satisfied by both RetrievalService and ScopedRetrievalService."""
+
+    async def search(
+        self, *, tenant_id: uuid.UUID, query: str, limit: int | None = None
+    ) -> list[RetrievedChunk]: ...
+
+
+class ConversationBusyError(RuntimeError):
+    """Another turn is already running for this conversation."""
+
+
+# ==============================================================================
+# Helpers
+# ==============================================================================
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+def _parse_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _last_human_index(messages: list[BaseMessage]) -> int | None:
+    for idx in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[idx], HumanMessage):
+            return idx
+    return None
+
+
+def _log_ctx(state: AgentState) -> dict[str, Any]:
+    return {
+        "conversation_id": state.get("conversation_id"),
+        "tenant_id": state.get("tenant_id"),
+    }
+
+
+def _to_llm_history(messages: list[BaseMessage], upto: int, limit: int) -> list[ChatMessage]:
+    """Messages before the current query, trimmed to the last `limit`.
+    Human-agent messages are AIMessage too, so the AI sees what the agent said."""
+    prior = messages[:upto][-limit:] if limit > 0 else []
+    return [
+        ChatMessage(
+            role="user" if isinstance(m, HumanMessage) else "assistant",
+            content=str(m.content),
+        )
+        for m in prior
+    ]
+
+
+async def _call_with_retry[T](
+    factory: Callable[[], Awaitable[T]],
+    *,
+    timeout: float,
+    retries: int,
+    backoff: float = 0.5,
+) -> T:
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            return await asyncio.wait_for(factory(), timeout=timeout)
+        except Exception as exc:  # CancelledError is BaseException, so it propagates
+            last_exc = exc
+            if attempt < retries:
+                await asyncio.sleep(backoff * (2**attempt))
+    assert last_exc is not None
+    raise last_exc
+
+
+def _ai_reclaim_updates() -> dict[str, Any]:
+    """State changes when the AI takes the conversation back."""
+    return {
+        "status": "ai",
+        "assigned_agent_id": None,
+        "handoff_reason": None,
+        "handoff_requested_at": None,
+        "last_human_activity_at": None,
+        "handoff_notice_sent": False,
+        "ai_failure_count": 0,
+    }
+
+
+def _handoff_updates(reason: str) -> dict[str, Any]:
+    return {
+        "requires_human": True,
+        "status": "handoff_requested",
+        "handoff_reason": reason,
+        "handoff_requested_at": utc_now_iso(),
+        "last_human_activity_at": None,
+        "handoff_notice_sent": False,
+    }
+
+
+# ==============================================================================
+# Node 1: Intent & Lifecycle Router (includes the 5-minute inactivity check)
+# ==============================================================================
+
+
+def make_intent_router_node(cfg: HitlConfig = DEFAULT_CONFIG):
+    async def intent_router_node(state: AgentState) -> dict[str, Any]:
+        status = state.get("status", "ai")
+        now = _utcnow()
+        updates: dict[str, Any] = {}
+
+        if status == "resolved":
+            # Visitor wrote again after resolution -> reopen with AI.
+            logger.info("Reopening resolved conversation", extra=_log_ctx(state))
+            updates = _ai_reclaim_updates()
+            status = "ai"
+
+        elif status == "human_active":
+            last_activity = _parse_ts(state.get("last_human_activity_at")) or _parse_ts(
+                state.get("handoff_requested_at")
+            )
+            if last_activity is None:
+                # Agent assigned but no clock yet: start it now, stay silent.
+                return {
+                    "requires_human": True,
+                    "intent": "live_human_support",
+                    "last_human_activity_at": now.isoformat(),
+                }
+            idle = (now - last_activity).total_seconds()
+            if idle >= cfg.human_inactivity_timeout:
+                logger.info(
+                    "Human agent idle %.0fs, AI reclaiming conversation",
+                    idle,
+                    extra=_log_ctx(state),
+                )
+                updates = _ai_reclaim_updates()
+                status = "ai"
+            else:
+                return {"requires_human": True, "intent": "live_human_support"}
+
+        elif status == "handoff_requested":
+            requested_at = _parse_ts(state.get("handoff_requested_at"))
+            waited = (now - requested_at).total_seconds() if requested_at else 0.0
+            if requested_at and waited >= cfg.unclaimed_handoff_timeout:
+                logger.info(
+                    "Handoff unclaimed for %.0fs, AI reclaiming conversation",
+                    waited,
+                    extra=_log_ctx(state),
+                )
+                updates = _ai_reclaim_updates()
+                status = "ai"
+            else:
+                return {"requires_human": True, "intent": "live_human_support"}
+
+        # status == "ai" (originally, or just reclaimed): check for a new handoff request
+        messages = state.get("messages", [])
+        idx = _last_human_index(messages)
+        last_text = str(messages[idx].content) if idx is not None else ""
+
+        if detect_handoff_request(last_text, state.get("metadata", {})):
+            return {
+                **updates,
+                **_handoff_updates("user_request"),
+                "intent": "handoff_requested",
+            }
+
+        return {**updates, "requires_human": False, "intent": "property_inquiry"}
+
+    return intent_router_node
+
+
+# ==============================================================================
+# Node 2: Human Review (HITL silence / one-time notice)
+# ==============================================================================
+
+
+async def human_review_node(state: AgentState) -> dict[str, Any]:
+    """Human agent active -> AI silent. Handoff notice is sent only ONCE."""
+    if state.get("status") == "human_active" or state.get("handoff_notice_sent"):
+        return {"reply_content": None}
+
+    return {
+        "reply_content": HANDOFF_GUARDRAIL_REPLY,
+        "messages": [AIMessage(content=HANDOFF_GUARDRAIL_REPLY)],
+        "handoff_notice_sent": True,
+    }
+
+
+# ==============================================================================
+# Node 3: Grounded RAG + LLM generation
+# ==============================================================================
+
+
+def _failure_result(
+    state: AgentState, cfg: HitlConfig, *, retrieval_failed: bool
+) -> dict[str, Any]:
+    """Counts a failed AI turn. After N consecutive failures, escalate to a human."""
+    count = int(state.get("ai_failure_count", 0)) + 1
+    base: dict[str, Any] = {
+        "ai_failure_count": count,
+        "retrieval_failed": retrieval_failed,
+        "context_chunks": [],
+    }
+    if count >= cfg.max_ai_failures:
+        logger.error(
+            "AI failed %d times in a row, escalating to human", count, extra=_log_ctx(state)
+        )
+        return {
+            **base,
+            **_handoff_updates("ai_failure"),
+            "handoff_notice_sent": True,
+            "reply_content": HANDOFF_GUARDRAIL_REPLY,
+            "messages": [AIMessage(content=HANDOFF_GUARDRAIL_REPLY)],
+        }
+    # Visitor still gets a reply, but it is NOT stored as a real AI message in history.
+    return {**base, "reply_content": LLM_FALLBACK_REPLY}
+
+
+def make_rag_node(
+    llm: LLMProvider,
+    retrieval_service: SearchService | None = None,
+    cfg: HitlConfig = DEFAULT_CONFIG,
+):
+    async def rag_node(state: AgentState) -> dict[str, Any]:
+        ctx = _log_ctx(state)
+        messages = state.get("messages", [])
+        idx = _last_human_index(messages)
+        if idx is None or not str(messages[idx].content).strip():
+            return {"reply_content": None}
+        query = str(messages[idx].content)
+        tenant_id = uuid.UUID(state["tenant_id"])
+
+        # 1. Retrieval (timeout, failure counts toward escalation)
+        chunks: list[Any] = []
+        if retrieval_service is not None:
+            try:
+                chunks = await _call_with_retry(
+                    lambda: retrieval_service.search(tenant_id=tenant_id, query=query),
+                    timeout=cfg.retrieval_timeout,
+                    retries=0,
+                )
+            except Exception:
+                logger.exception("Knowledge search failed", extra=ctx)
+                return _failure_result(state, cfg, retrieval_failed=True)
+
+        # 2. Hallucination guard: nothing verified -> don't let the LLM guess listings/prices
+        if cfg.require_grounding and retrieval_service is not None and not chunks:
+            return {
+                "context_chunks": [],
+                "retrieval_failed": False,
+                "reply_content": NO_CONTEXT_REPLY,
+                "messages": [AIMessage(content=NO_CONTEXT_REPLY)],
+            }
+
+        # 3. LLM call (timeout + limited retry)
+        prompt_messages = build_chat_messages(
+            user_query=query,
+            context_chunks=chunks,
+            history=_to_llm_history(messages, idx, cfg.max_history_messages),
+        )
+        try:
+            resp = await _call_with_retry(
+                lambda: llm.complete(prompt_messages),
+                timeout=cfg.llm_timeout,
+                retries=cfg.llm_retries,
+            )
+            ai_content = (resp.content or "").strip()
+            if not ai_content:
+                raise ValueError("Empty LLM response")
+        except Exception:
+            logger.exception("LLM generation failed", extra=ctx)
+            return _failure_result(state, cfg, retrieval_failed=False)
+
+        return {
+            "context_chunks": [c.text for c in chunks],
+            "retrieval_failed": False,
+            "ai_failure_count": 0,  # success resets the consecutive-failure counter
+            "reply_content": ai_content,
+            "messages": [AIMessage(content=ai_content)],
+        }
+
+    return rag_node
+
+
+# ==============================================================================
+# Conditional edge
+# ==============================================================================
+
+
+def route_next_step(state: AgentState) -> Literal["human_review", "rag_agent"]:
+    return "human_review" if state.get("requires_human", False) else "rag_agent"
+
+
+# ==============================================================================
+# Graph builder: call ONCE at app startup, reuse for all requests
+# ==============================================================================
+
+
+def build_hitl_graph(
+    retrieval_service: SearchService | None,
+    llm: LLMProvider,
+    checkpointer: BaseCheckpointSaver | None = None,
+    cfg: HitlConfig = DEFAULT_CONFIG,
+) -> CompiledStateGraph:
+    if checkpointer is None:
+        logger.warning("No checkpointer given, using in-memory MemorySaver (DEV ONLY)")
+        checkpointer = MemorySaver()
+
+    workflow: StateGraph = StateGraph(cast(Any, AgentState))
+    workflow.add_node("intent_router", make_intent_router_node(cfg))
+    workflow.add_node("human_review", human_review_node)
+    workflow.add_node("rag_agent", make_rag_node(llm, retrieval_service, cfg))
+
+    workflow.add_edge(START, "intent_router")
+    workflow.add_conditional_edges(
+        "intent_router",
+        route_next_step,
+        {"human_review": "human_review", "rag_agent": "rag_agent"},
+    )
+    workflow.add_edge("human_review", END)
+    workflow.add_edge("rag_agent", END)
+    return workflow.compile(checkpointer=checkpointer)
+
+
+# ==============================================================================
+# Runtime helpers: thread config, per-conversation lock, running a turn
+# ==============================================================================
+
+
+def build_thread_config(
+    tenant_id: str | uuid.UUID, conversation_id: str | uuid.UUID
+) -> RunnableConfig:
+    """Tenant-scoped thread id, so two tenants can never share a checkpoint."""
+    return cast(
+        RunnableConfig,
+        {"configurable": {"thread_id": f"{tenant_id}:{conversation_id}"}},
+    )
+
+
+@asynccontextmanager
+async def conversation_lock(
+    redis: Redis | None,
+    tenant_id: str | uuid.UUID,
+    conversation_id: str | uuid.UUID,
+    cfg: HitlConfig = DEFAULT_CONFIG,
+) -> AsyncIterator[None]:
+    """Only one graph run / state update per conversation at a time."""
+    if redis is None:
+        yield
+        return
+    lock = redis.lock(
+        f"lock:conv:{tenant_id}:{conversation_id}",
+        timeout=cfg.lock_ttl,
+        blocking_timeout=cfg.lock_wait,
+    )
+    if not await lock.acquire():
+        raise ConversationBusyError(f"Conversation {conversation_id} is busy")
+    try:
+        yield
+    finally:
+        try:
+            await lock.release()
+        except LockError:
+            logger.warning("Conversation lock expired before release: %s", conversation_id)
+
+
+async def run_turn(
+    graph: CompiledStateGraph,
+    *,
+    tenant_id: str | uuid.UUID,
+    conversation_id: str | uuid.UUID,
+    turn_input: dict[str, Any],
+    redis: Redis | None = None,
+    cfg: HitlConfig = DEFAULT_CONFIG,
+) -> dict[str, Any]:
+    """Run one visitor turn. `turn_input` = make_initial_state(...) or make_turn_input(...)."""
+    async with conversation_lock(redis, tenant_id, conversation_id, cfg):
+        config = build_thread_config(tenant_id, conversation_id)
+        result = await graph.ainvoke(turn_input, config=config)
+        return cast(dict[str, Any], result)
+
+
+async def record_human_agent_message(
+    graph: CompiledStateGraph,
+    *,
+    tenant_id: str | uuid.UUID,
+    conversation_id: str | uuid.UUID,
+    agent_id: str | uuid.UUID,
+    content: str,
+    redis: Redis | None = None,
+    cfg: HitlConfig = DEFAULT_CONFIG,
+) -> None:
+    """Call this whenever a human agent sends a message.
+    It (1) restarts the 5-minute inactivity clock, (2) marks the conversation
+    human_active, (3) puts the agent's words in graph history so the AI knows
+    the context if it takes over later."""
+    async with conversation_lock(redis, tenant_id, conversation_id, cfg):
+        config = build_thread_config(tenant_id, conversation_id)
+        await graph.aupdate_state(
+            config,
+            {
+                "messages": [
+                    AIMessage(
+                        content=content,
+                        name=HUMAN_AGENT_NAME,
+                        additional_kwargs={"sender_type": "agent", "agent_id": str(agent_id)},
+                    )
+                ],
+                "status": "human_active",
+                "assigned_agent_id": str(agent_id),
+                "last_human_activity_at": utc_now_iso(),
+                "handoff_notice_sent": True,
+            },
+            as_node="human_review",
+        )

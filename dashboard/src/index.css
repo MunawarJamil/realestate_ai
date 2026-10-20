@@ -262,3 +262,46 @@ html.light ::-webkit-scrollbar-thumb:hover {
   background: #BFB4A0;
 }
 
+
+
+/* ==========================================================================
+   Chat Conversation Stream in Light Mode
+   ========================================================================== */
+
+/* Licensed Advisor (You) - Soft Luxury Blue Bubble */
+html.light .bg-\[\#131E30\] {
+  background-color: #EFF6FF !important;
+  border-color: #BFDBFE !important;
+  box-shadow: 0 1px 3px 0 rgba(30, 58, 138, 0.08) !important;
+}
+
+html.light .bg-\[\#131E30\] p,
+html.light .bg-\[\#131E30\] .text-zinc-100 {
+  color: #1E3A8A !important;
+}
+
+/* Visitor / VIP Client - Soft Warm Porcelain Amber Bubble */
+html.light .bg-\[\#2A1D15\] {
+  background-color: #FFF7ED !important;
+  border-color: #FED7AA !important;
+  box-shadow: 0 1px 3px 0 rgba(194, 65, 12, 0.06) !important;
+}
+
+html.light .bg-\[\#2A1D15\] p,
+html.light .bg-\[\#2A1D15\] .text-zinc-100 {
+  color: #431407 !important;
+}
+
+/* AI Assistant Grounded Citations & Metadata Chips */
+html.light .bg-black\/40 {
+  background-color: #FAF5E8 !important;
+  border-color: #E8E2D5 !important;
+  color: #44403C !important;
+}
+
+/* Citation Source Badges */
+html.light .bg-\[\#1E1E21\] .font-mono {
+  background-color: #ECFDF5 !important;
+  border-color: #A7F3D0 !important;
+  color: #065F46 !important;
+}

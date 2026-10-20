@@ -20,7 +20,8 @@ import type { Conversation, ConversationStatus, Message, BackendConversationSumm
 import type { BackendConversation, BackendMessage } from '../../api/client';
 import { Button } from '../../components/ui/Button';
 import { apiClient, ApiError } from '../../api/client';
-import { AgentWebSocketClient } from '../../api/agentWs'; // # 12b HITL
+import { AgentSocketClient } from '../../api/agentSocket';
+
 
 function mapBackendConversation(
   conv: BackendConversation,
@@ -85,7 +86,7 @@ export const AgencyConversationsPage: React.FC = () => {
   const [showSummaryDrawer, setShowSummaryDrawer] = useState(false);
   const [agentWsConnected, setAgentWsConnected] = useState(false);
   const [liveHandoffAlert, setLiveHandoffAlert] = useState<{ conversation_id: string; snippet: string } | null>(null);
-  const agentWsRef = useRef<AgentWebSocketClient | null>(null);
+  const agentWsRef = useRef<AgentSocketClient | null>(null);
 
   // Real-time SSE streaming state
   const [isStreaming, setIsStreaming] = useState(false);
@@ -129,35 +130,15 @@ export const AgencyConversationsPage: React.FC = () => {
     fetchConversations();
   }, [fetchConversations]);
 
-  // # 12b HITL - Connect Agency Agent WebSocket for real-time handoff alerts & live broker messages
+
+    // # 12c HITL - Connect Agency Agent Socket.IO for real-time live two-way messaging
   useEffect(() => {
-    const ws = new AgentWebSocketClient({
+    const socket = new AgentSocketClient({
       onConnected: () => {
         setAgentWsConnected(true);
       },
       onDisconnected: () => {
         setAgentWsConnected(false);
-      },
-      onHandoffAlert: (alert) => {
-        setLiveHandoffAlert({
-          conversation_id: alert.conversation_id,
-          snippet: alert.snippet,
-        });
-        showNotification(`🚨 Live Visitor Alert: ${alert.snippet}`);
-        fetchConversations();
-      },
-      onStatusChange: (data) => {
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === data.conversation_id
-              ? {
-                  ...c,
-                  status: data.status as ConversationStatus,
-                  assigned_agent_id: data.assigned_agent_id,
-                }
-              : c
-          )
-        );
       },
       onMessage: (msg) => {
         setConversations((prev) =>
@@ -177,18 +158,37 @@ export const AgencyConversationsPage: React.FC = () => {
         );
         setTimeout(scrollToBottom, 60);
       },
+      onVisitorActivity: (msg) => {
+        // Update sidebar preview for other conversations
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id === msg.conversation_id) {
+              const mapped = mapBackendMessage(msg);
+              const exists = c.messages.some((m) => m.id === msg.id);
+              if (exists) return c;
+              return {
+                ...c,
+                last_message_at: mapped.created_at,
+                messages: [...c.messages, mapped],
+              };
+            }
+            return c;
+          })
+        );
+      },
       onError: (err) => {
-        console.warn('[RealEstateAI Agent WS] Notice:', err);
+        console.warn('[RealEstateAI Agent Socket.IO] Notice:', err);
       },
     });
 
-    ws.connect();
-    agentWsRef.current = ws;
+    socket.connect();
+    agentWsRef.current = socket;
 
     return () => {
-      ws.disconnect();
+      socket.disconnect();
     };
   }, [fetchConversations]);
+
 
   // 2. Fetch Messages for Selected Conversation
   const loadMessages = useCallback(async (convId: string) => {
@@ -208,15 +208,29 @@ export const AgencyConversationsPage: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
+  // useEffect(() => {
+  //   if (selectedId) {
+  //     loadMessages(selectedId);
+  //     // Reset summary drawer when switching conversations
+  //     setActiveSummary(null);
+  //     setShowSummaryDrawer(false);
+  //   }
+  // }, [selectedId, loadMessages]);
+
+
+    useEffect(() => {
     if (selectedId) {
       loadMessages(selectedId);
+      // # 12c HITL - Join active conversation room on Socket.IO
+      agentWsRef.current?.joinConversation(selectedId);
       // Reset summary drawer when switching conversations
       setActiveSummary(null);
       setShowSummaryDrawer(false);
     }
   }, [selectedId, loadMessages]);
 
+
+  
   const selectedConv = conversations.find((c) => c.id === selectedId) || null;
 
   const filteredConversations = conversations.filter((c) => {
