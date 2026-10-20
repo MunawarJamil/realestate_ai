@@ -1,9 +1,9 @@
 # PROJECT PROGRESS TRACKER (progress.md)
 
-> **Last Updated**: 2026-10-19  
-> **Current Phase**: Phase 9 (Dashboard UI V1 Completed ✅) ➔ Next: Phase 7 (Authentication & API Integration)  
-> **Status**: Ready to Execute Phase 7 (Step 7.1 Backend Tenants Listing)  
-> **Current File Context**: [`src/app/modules/tenants/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/tenants/) & [`dashboard/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/dashboard/)
+> **Last Updated**: 2026-10-20  
+> **Current Phase**: Phase 12 (Socket.IO + LangGraph HITL + Verification Completed ✅) ➔ Next: Phase 13 (CRM Leads Pipeline & Webhook Integrations)  
+> **Status**: Phase 12 100% Tested & Verified via Automated PowerShell Suite  
+> **Current File Context**: [`src/app/modules/chat/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/chat/) & [`scratch/test_lifecycle.ps1`](file:///C:/Users/HP/.gemini/antigravity-ide/brain/f6d7e5db-9cc7-4a63-be34-6cb9a0b753d7/scratch/test_lifecycle.ps1)
 
 ---
 
@@ -299,3 +299,35 @@
   - Upgraded `AgencyLoginPage.tsx` with work email/password login, tenant slug detection, and RBAC support.
   - Integrated active user profile display and role badges in `SuperAdminLayout.tsx` and `AgencyLayout.tsx`.
   - Verified `tsc -b && vite build` passed with zero errors.
+- [x] **Phase 12c: Socket.IO Real-Time Gateway (Visitor <-> Agency Live Communication)**:
+  - Backend: `python-socketio` AsyncServer mounted as ASGI wrapper in `main.py`.
+  - Multi-tenant room isolation: `conv_{id}` for active conversation channels and `tenant_{id}_agents` for agency-wide alerts.
+  - Full-duplex Socket.IO client in embeddable widget (`widget/src/socket.ts`).
+  - Real-time `AgentSocketClient` in agency dashboard (`dashboard/src/api/agentSocket.ts`).
+  - Verified two-way live messaging between website widget visitor and agency broker without page reloads.
+- [x] **Phase 12d: LangGraph Human-in-the-Loop (HITL) State Machine Orchestration**:
+  - Schema (`graph_state.py`): Typed `AgentState` schema with append-only messages reducer (`add_messages`) and merged metadata reducer (`merge_dicts`).
+  - Graph Engine (`hitl_graph.py`): Intent router node, RAG agent node, human review node, and conditional routing based on handoff detection and AI failure thresholds.
+  - Runtime Lifecycle (`graph_runtime.py`): Eager startup compilation (`init_graph()`), Postgres checkpointing pool support with fallback to `MemorySaver`, thread isolation (`configurable: {thread_id: tenant_id:conv_id}`), and per-conversation distributed Redis locking.
+  - Gateway Integration (`socketio_server.py`): Visitor messages trigger LangGraph turns via `run_visitor_turn`; broker replies trigger `sync_agent_message` resetting inactivity timers. Metadata-based visitor isolation via `conv.metadata_["visitor_id"]`.
+  - App Lifespan (`main.py`): Wire `await init_graph()` and `await shutdown_graph()` into ASGI application startup and shutdown.
+- [x] **Phase 12e: Legacy Real-Time Code Cleanup & Consolidation**:
+  - Deleted obsolete native WebSocket endpoints and managers: `widget/src/ws.ts`, `src/app/modules/chat/ws_router.py`, `src/app/modules/chat/connection_manager.py`, and `src/app/modules/chat/events.py` (~834 lines removed).
+  - Unmounted dead `ws_router` from `main.py`.
+  - Refactored `ChatService` REST actions (`claim_conversation`, `release_conversation`, `resolve_conversation`, `send_message`) to broadcast directly via `sio.emit`.
+  - Cleaned `redis_pubsub.py` to serve purely as Redis client connection lifecycle manager.
+  - Verified widget build (`70.08 kB`), dashboard build (`526 kB`), and backend ASGI app loading with 0 errors.
+- [x] **Phase 12f: Automated End-to-End PowerShell Verification of AI Assistant & HITL Lifecycle**:
+  - Validated Step 1: Visitor Session Init (`POST /api/v1/widget/session` with `X-Widget-Key`) -> Verified visitor JWT token and tenant context.
+  - Validated Step 2: Conversation Creation (`POST /api/v1/widget/conversations`) -> Initial state `ai`.
+  - Validated Step 3: Grounded AI RAG Retrieval (`POST /api/v1/widget/conversations/{id}/messages`) -> Retrieved Qdrant vectors for `AP-DEMO-103, Dabouq Family Villa` with zero hallucinations and accurate pricing (JOD 285,000).
+  - Validated Step 4: Human Broker Handoff Guardrail -> Visitor requested human agent, triggering handoff acknowledgment.
+  - Validated Step 5: Agency Broker Authentication (`POST /api/v1/auth/login`) -> Verified JWT access token generation with `aud="agency"`.
+  - Validated Step 6: Agent Claim Conversation (`POST /api/v1/chat/conversations/{id}/claim`) -> Successfully transitioned status to `human_active` and assigned to agent.
+  - Validated Step 7: AI Silence Enforcement -> Confirmed AI remains silent while broker is actively managing the thread.
+  - Validated Step 8: AI Handover Executive Brief (`GET /api/v1/chat/conversations/{id}/summary`) -> LLM extracted structured intent (`Luxury Villa`), location (`Dabouq, Amman`), and budget (`JOD 285,000`).
+  - Validated Step 9: Agent Resolution (`POST /api/v1/chat/conversations/{id}/resolve`) -> Transitioned conversation to `resolved`.
+  - Validated Step 10: Multi-Tenant Conversation Listing (`GET /api/v1/chat/conversations`) -> Verified state persistence and listing in tenant workspace.
+
+
+

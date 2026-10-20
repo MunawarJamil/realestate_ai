@@ -1,6 +1,7 @@
 import logging
 import uuid
 from collections.abc import AsyncIterator, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from app.integrations.llm.base import ChatMessage, LLMProvider
@@ -92,9 +93,7 @@ class ChatService:
             assigned_agent_id=assigned_agent_id,
         )
         if not conversation:
-            raise ConversationNotFoundError(
-                f"Conversation {conversation_id} not found."
-            )
+            raise ConversationNotFoundError(f"Conversation {conversation_id} not found.")
         return conversation
 
     async def list_conversations_for_visitor(
@@ -125,11 +124,8 @@ class ChatService:
             visitor_id=visitor_id,
         )
         if not conversation:
-            raise ConversationNotFoundError(
-                f"Conversation {conversation_id} not found."
-            )
+            raise ConversationNotFoundError(f"Conversation {conversation_id} not found.")
         return conversation
-
 
     async def list_messages(
         self,
@@ -173,7 +169,9 @@ class ChatService:
         # # 12b HITL - Detect human handoff request in REST mode
         from app.modules.chat.handoff import HANDOFF_GUARDRAIL_REPLY, detect_handoff_request
 
-        if conv.status == ConversationStatus.AI and detect_handoff_request(clean_text, conv.metadata_):
+        if conv.status == ConversationStatus.AI and detect_handoff_request(
+            clean_text, conv.metadata_
+        ):
             await self._repository.update_conversation_status(
                 tenant_id=tenant_id,
                 conversation_id=conversation_id,
@@ -187,59 +185,51 @@ class ChatService:
                 content=HANDOFF_GUARDRAIL_REPLY,
             )
             try:
-                from app.modules.chat.connection_manager import get_connection_manager
-                from app.modules.chat.events import (
-                    StatusChangePayload,
-                    WSEvent,
-                    WSEventType,
-                )
+                from app.modules.chat.socketio_server import sio
 
-                conn_mgr = get_connection_manager()
-                status_event = WSEvent(
-                    event=WSEventType.STATUS_CHANGE,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
-                    payload=StatusChangePayload(status=ConversationStatus.HANDOFF_REQUESTED).model_dump(mode="json"),
-                )
-                await conn_mgr.broadcast_conversation_event(tenant_id, conversation_id, status_event)
-                await conn_mgr.broadcast_agent_alert(tenant_id, status_event)
-
-                alert_event = WSEvent(
-                    event=WSEventType.HANDOFF_REQUEST,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
-                    payload={
-                        "conversation_title": conv.title or "Visitor Inquiry",
-                        "snippet": clean_text,
+                await sio.emit(
+                    "handoff_requested",
+                    {
+                        "conversation_id": str(conversation_id),
+                        "reason": "guardrail_trigger",
+                        "visitor_message": clean_text,
+                        "created_at": datetime.now(UTC).isoformat(),
                     },
+                    room=f"tenant_{tenant_id}_agents",
                 )
-                await conn_mgr.broadcast_agent_alert(tenant_id, alert_event)
+                await sio.emit(
+                    "new_message",
+                    {
+                        "id": str(assistant_message.id),
+                        "conversation_id": str(conversation_id),
+                        "role": "assistant",
+                        "sender_type": "ai",
+                        "content": HANDOFF_GUARDRAIL_REPLY,
+                        "created_at": datetime.now(UTC).isoformat(),
+                    },
+                    room=f"conv_{conversation_id}",
+                )
             except Exception as exc:
-                logger.warning("Could not broadcast handoff event: %r", exc)
+                logger.warning("Could not broadcast handoff event to Socket.IO: %r", exc)
             return assistant_message
 
         # # 12b HITL - If human agent is already active or handoff is queued, AI agent remains silent!
         if conv.status in (ConversationStatus.HUMAN_ACTIVE, ConversationStatus.HANDOFF_REQUESTED):
             try:
-                from app.modules.chat.connection_manager import get_connection_manager
-                from app.modules.chat.events import MessagePayload, WSEvent, WSEventType
+                from app.modules.chat.socketio_server import sio
 
-                conn_mgr = get_connection_manager()
-                buyer_alert = WSEvent(
-                    event=WSEventType.MESSAGE,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
-                    payload=MessagePayload(
-                        id=user_msg.id,
-                        role=user_msg.role.value,
-                        sender_type=user_msg.sender_type,
-                        content=user_msg.content,
-                        created_at=user_msg.created_at,
-                    ).model_dump(mode="json"),
-                )
-                await conn_mgr.broadcast_agent_alert(tenant_id, buyer_alert)
+                msg_payload = {
+                    "id": str(user_msg.id),
+                    "conversation_id": str(conversation_id),
+                    "role": "user",
+                    "sender_type": "visitor",
+                    "content": user_msg.content,
+                    "created_at": datetime.now(UTC).isoformat(),
+                }
+                await sio.emit("new_message", msg_payload, room=f"conv_{conversation_id}")
+                await sio.emit("visitor_activity", msg_payload, room=f"tenant_{tenant_id}_agents")
             except Exception as exc:
-                logger.warning("Could not broadcast buyer message in HITL mode: %r", exc)
+                logger.warning("Could not broadcast buyer message to Socket.IO: %r", exc)
             return user_msg
 
         # 2. Build history (excluding the current turn which we just added)
@@ -249,8 +239,7 @@ class ChatService:
             limit=11,
         )
         history = [
-            ChatMessage(role=msg.role.value, content=msg.content)
-            for msg in history_records[:-1]
+            ChatMessage(role=msg.role.value, content=msg.content) for msg in history_records[:-1]
         ]
 
         # 3. Retrieve relevant chunks
@@ -308,13 +297,15 @@ class ChatService:
         # # 12b HITL - Detect human handoff request in stream mode
         from app.modules.chat.handoff import HANDOFF_GUARDRAIL_REPLY, detect_handoff_request
 
-        if conv.status == ConversationStatus.AI and detect_handoff_request(clean_text, conv.metadata_):
+        if conv.status == ConversationStatus.AI and detect_handoff_request(
+            clean_text, conv.metadata_
+        ):
             await self._repository.update_conversation_status(
                 tenant_id=tenant_id,
                 conversation_id=conversation_id,
                 status=ConversationStatus.HANDOFF_REQUESTED,
             )
-            await self._repository.create_message(
+            assistant_msg = await self._repository.create_message(
                 tenant_id=tenant_id,
                 conversation_id=conversation_id,
                 role=MessageRole.ASSISTANT,
@@ -322,35 +313,34 @@ class ChatService:
                 content=HANDOFF_GUARDRAIL_REPLY,
             )
             try:
-                from app.modules.chat.connection_manager import get_connection_manager
-                from app.modules.chat.events import (
-                    StatusChangePayload,
-                    WSEvent,
-                    WSEventType,
-                )
+                from app.modules.chat.socketio_server import sio
 
-                conn_mgr = get_connection_manager()
-                status_event = WSEvent(
-                    event=WSEventType.STATUS_CHANGE,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
-                    payload=StatusChangePayload(status=ConversationStatus.HANDOFF_REQUESTED).model_dump(mode="json"),
-                )
-                await conn_mgr.broadcast_conversation_event(tenant_id, conversation_id, status_event)
-                await conn_mgr.broadcast_agent_alert(tenant_id, status_event)
-
-                alert_event = WSEvent(
-                    event=WSEventType.HANDOFF_REQUEST,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
-                    payload={
-                        "conversation_title": conv.title or "Visitor Inquiry",
-                        "snippet": clean_text,
+                await sio.emit(
+                    "handoff_requested",
+                    {
+                        "conversation_id": str(conversation_id),
+                        "reason": "guardrail_trigger",
+                        "visitor_message": clean_text,
+                        "created_at": datetime.now(UTC).isoformat(),
                     },
+                    room=f"tenant_{tenant_id}_agents",
                 )
-                await conn_mgr.broadcast_agent_alert(tenant_id, alert_event)
+                await sio.emit(
+                    "new_message",
+                    {
+                        "id": str(assistant_msg.id),
+                        "conversation_id": str(conversation_id),
+                        "role": "assistant",
+                        "sender_type": "ai",
+                        "content": HANDOFF_GUARDRAIL_REPLY,
+                        "created_at": datetime.now(UTC).isoformat(),
+                    },
+                    room=f"conv_{conversation_id}",
+                )
             except Exception as exc:
-                logger.warning("Could not broadcast handoff event from stream_chat: %r", exc)
+                logger.warning(
+                    "Could not broadcast handoff event from stream_chat to Socket.IO: %r", exc
+                )
 
             for token in HANDOFF_GUARDRAIL_REPLY.split(" "):
                 yield token + " "
@@ -359,25 +349,20 @@ class ChatService:
         # # 12b HITL - If human agent is already active or handoff is queued, AI agent remains silent!
         if conv.status in (ConversationStatus.HUMAN_ACTIVE, ConversationStatus.HANDOFF_REQUESTED):
             try:
-                from app.modules.chat.connection_manager import get_connection_manager
-                from app.modules.chat.events import MessagePayload, WSEvent, WSEventType
+                from app.modules.chat.socketio_server import sio
 
-                conn_mgr = get_connection_manager()
-                buyer_alert = WSEvent(
-                    event=WSEventType.MESSAGE,
-                    conversation_id=conversation_id,
-                    tenant_id=tenant_id,
-                    payload=MessagePayload(
-                        id=user_msg.id,
-                        role=user_msg.role.value,
-                        sender_type=user_msg.sender_type,
-                        content=user_msg.content,
-                        created_at=user_msg.created_at,
-                    ).model_dump(mode="json"),
-                )
-                await conn_mgr.broadcast_agent_alert(tenant_id, buyer_alert)
+                msg_payload = {
+                    "id": str(user_msg.id),
+                    "conversation_id": str(conversation_id),
+                    "role": "user",
+                    "sender_type": "visitor",
+                    "content": user_msg.content,
+                    "created_at": datetime.now(UTC).isoformat(),
+                }
+                await sio.emit("new_message", msg_payload, room=f"conv_{conversation_id}")
+                await sio.emit("visitor_activity", msg_payload, room=f"tenant_{tenant_id}_agents")
             except Exception as exc:
-                logger.warning("Could not broadcast buyer message in HITL mode: %r", exc)
+                logger.warning("Could not broadcast buyer message to Socket.IO: %r", exc)
             return
 
         # 2. Fetch history
@@ -387,8 +372,7 @@ class ChatService:
             limit=11,
         )
         history = [
-            ChatMessage(role=msg.role.value, content=msg.content)
-            for msg in history_records[:-1]
+            ChatMessage(role=msg.role.value, content=msg.content) for msg in history_records[:-1]
         ]
 
         # 3. Retrieve knowledge
@@ -434,7 +418,9 @@ class ChatService:
         agent_id: uuid.UUID,
         agent_name: str | None = None,
     ) -> Conversation:
-        conversation = await self.get_conversation(tenant_id=tenant_id, conversation_id=conversation_id)
+        conversation = await self.get_conversation(
+            tenant_id=tenant_id, conversation_id=conversation_id
+        )
         conversation.status = ConversationStatus.HUMAN_ACTIVE
         conversation.assigned_agent_id = agent_id
 
@@ -451,23 +437,18 @@ class ChatService:
 
         # Broadcast real-time status update to visitor & agent alert room
         try:
-            from app.modules.chat.connection_manager import get_connection_manager
-            from app.modules.chat.events import StatusChangePayload, WSEvent, WSEventType
+            from app.modules.chat.socketio_server import sio
 
-            conn_mgr = get_connection_manager()
-            event = WSEvent(
-                event=WSEventType.STATUS_CHANGE,
-                conversation_id=conversation_id,
-                tenant_id=tenant_id,
-                payload=StatusChangePayload(
-                    status=ConversationStatus.HUMAN_ACTIVE,
-                    assigned_agent_id=agent_id,
-                ).model_dump(mode="json"),
-            )
-            await conn_mgr.broadcast_conversation_event(tenant_id, conversation_id, event)
-            await conn_mgr.broadcast_agent_alert(tenant_id, event)
+            status_payload = {
+                "conversation_id": str(conversation_id),
+                "status": ConversationStatus.HUMAN_ACTIVE.value,
+                "assigned_agent_id": str(agent_id),
+                "agent_name": name,
+            }
+            await sio.emit("status_change", status_payload, room=f"conv_{conversation_id}")
+            await sio.emit("status_change", status_payload, room=f"tenant_{tenant_id}_agents")
         except Exception as exc:
-            logger.warning("Failed to broadcast claim event to Redis: %r", exc)
+            logger.warning("Failed to broadcast claim event to Socket.IO: %r", exc)
 
         await self._repository._session.flush()
         await self._repository._session.refresh(conversation)
@@ -480,7 +461,9 @@ class ChatService:
         tenant_id: uuid.UUID,
         conversation_id: uuid.UUID,
     ) -> Conversation:
-        conversation = await self.get_conversation(tenant_id=tenant_id, conversation_id=conversation_id)
+        conversation = await self.get_conversation(
+            tenant_id=tenant_id, conversation_id=conversation_id
+        )
         conversation.status = ConversationStatus.AI
         conversation.assigned_agent_id = None
 
@@ -493,23 +476,22 @@ class ChatService:
         )
 
         try:
-            from app.modules.chat.connection_manager import get_connection_manager
-            from app.modules.chat.events import StatusChangePayload, WSEvent, WSEventType
+            from app.modules.chat.socketio_server import sio
 
-            conn_mgr = get_connection_manager()
-            event = WSEvent(
-                event=WSEventType.STATUS_CHANGE,
-                conversation_id=conversation_id,
-                tenant_id=tenant_id,
-                payload=StatusChangePayload(
-                    status=ConversationStatus.AI,
-                    assigned_agent_id=None,
-                ).model_dump(mode="json"),
+            status_payload = {
+                "conversation_id": str(conversation_id),
+                "status": ConversationStatus.AI.value,
+                "assigned_agent_id": None,
+            }
+            await sio.emit("status_change", status_payload, room=f"conv_{conversation_id}")
+            await sio.emit("status_change", status_payload, room=f"tenant_{tenant_id}_agents")
+            await sio.emit(
+                "ai_resumed",
+                {"conversation_id": str(conversation_id)},
+                room=f"tenant_{tenant_id}_agents",
             )
-            await conn_mgr.broadcast_conversation_event(tenant_id, conversation_id, event)
-            await conn_mgr.broadcast_agent_alert(tenant_id, event)
         except Exception as exc:
-            logger.warning("Failed to broadcast release event to Redis: %r", exc)
+            logger.warning("Failed to broadcast release event to Socket.IO: %r", exc)
 
         await self._repository._session.flush()
         await self._repository._session.refresh(conversation)
@@ -522,7 +504,9 @@ class ChatService:
         tenant_id: uuid.UUID,
         conversation_id: uuid.UUID,
     ) -> Conversation:
-        conversation = await self.get_conversation(tenant_id=tenant_id, conversation_id=conversation_id)
+        conversation = await self.get_conversation(
+            tenant_id=tenant_id, conversation_id=conversation_id
+        )
         conversation.status = ConversationStatus.RESOLVED
 
         await self._repository.create_message(
@@ -534,23 +518,19 @@ class ChatService:
         )
 
         try:
-            from app.modules.chat.connection_manager import get_connection_manager
-            from app.modules.chat.events import StatusChangePayload, WSEvent, WSEventType
+            from app.modules.chat.socketio_server import sio
 
-            conn_mgr = get_connection_manager()
-            event = WSEvent(
-                event=WSEventType.STATUS_CHANGE,
-                conversation_id=conversation_id,
-                tenant_id=tenant_id,
-                payload=StatusChangePayload(
-                    status=ConversationStatus.RESOLVED,
-                    assigned_agent_id=conversation.assigned_agent_id,
-                ).model_dump(mode="json"),
-            )
-            await conn_mgr.broadcast_conversation_event(tenant_id, conversation_id, event)
-            await conn_mgr.broadcast_agent_alert(tenant_id, event)
+            status_payload = {
+                "conversation_id": str(conversation_id),
+                "status": ConversationStatus.RESOLVED.value,
+                "assigned_agent_id": str(conversation.assigned_agent_id)
+                if conversation.assigned_agent_id
+                else None,
+            }
+            await sio.emit("status_change", status_payload, room=f"conv_{conversation_id}")
+            await sio.emit("status_change", status_payload, room=f"tenant_{tenant_id}_agents")
         except Exception as exc:
-            logger.warning("Failed to broadcast resolve event to Redis: %r", exc)
+            logger.warning("Failed to broadcast resolve event to Socket.IO: %r", exc)
 
         await self._repository._session.flush()
         await self._repository._session.refresh(conversation)
@@ -564,6 +544,7 @@ class ChatService:
         conversation_id: uuid.UUID,
     ):
         import json
+
         from app.modules.chat.prompts import build_summary_messages
         from app.modules.chat.schemas import ConversationSummaryResponse
 
@@ -619,4 +600,3 @@ class ChatService:
                 budget=None,
                 preferred_location=None,
             )
-
