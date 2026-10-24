@@ -4,6 +4,8 @@ import { ChatMessage } from './types';
 
 export interface WidgetSocketCallbacks {
   onMessage: (msg: ChatMessage) => void;
+  onStatusChange?: (data: { status: any; agent_name?: string }) => void;
+  onConversationRecreated?: (data: { conversation_id: string }) => void;
   onTyping?: (data: { is_typing: boolean; sender: string }) => void;
   onConnected?: () => void;
   onDisconnected?: () => void;
@@ -47,7 +49,8 @@ export class WidgetSocketClient {
     });
 
     this.socket.on('new_message', (payload: any) => {
-      const role = payload.role === 'user' ? 'user' : 'assistant';
+      const role =
+        payload.role === 'user' ? 'user' : payload.role === 'system' ? 'system' : 'assistant';
       const msg: ChatMessage = {
         id: payload.id || `msg_${Date.now()}`,
         role: role,
@@ -56,6 +59,17 @@ export class WidgetSocketClient {
         created_at: payload.created_at,
       };
       this.callbacks.onMessage(msg);
+    });
+
+    this.socket.on('status_change', (payload: any) => {
+      this.callbacks.onStatusChange?.(payload);
+    });
+
+    this.socket.on('conversation_recreated', (payload: any) => {
+      if (payload?.conversation_id) {
+        this.conversationId = payload.conversation_id;
+      }
+      this.callbacks.onConversationRecreated?.(payload);
     });
 
     this.socket.on('user_typing', (data: any) => {
@@ -78,6 +92,15 @@ export class WidgetSocketClient {
     this.socket.emit('send_message', {
       conversation_id: this.conversationId,
       content,
+    });
+    return true;
+  }
+
+  public sendTyping(isTyping: boolean): boolean {
+    if (!this.socket || !this.socket.connected) return false;
+    this.socket.emit('typing', {
+      conversation_id: this.conversationId,
+      is_typing: isTyping,
     });
     return true;
   }

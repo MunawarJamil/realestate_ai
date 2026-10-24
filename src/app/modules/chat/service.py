@@ -426,7 +426,7 @@ class ChatService:
 
         # Insert audit system message
         name = agent_name or "A licensed property advisor"
-        await self._repository.create_message(
+        system_msg = await self._repository.create_message(
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             role=MessageRole.SYSTEM,
@@ -447,6 +447,18 @@ class ChatService:
             }
             await sio.emit("status_change", status_payload, room=f"conv_{conversation_id}")
             await sio.emit("status_change", status_payload, room=f"tenant_{tenant_id}_agents")
+            await sio.emit(
+                "new_message",
+                {
+                    "id": str(system_msg.id),
+                    "conversation_id": str(conversation_id),
+                    "role": "system",
+                    "sender_type": "system",
+                    "content": f"{name} has joined the conversation.",
+                    "created_at": datetime.now(UTC).isoformat(),
+                },
+                room=f"conv_{conversation_id}",
+            )
         except Exception as exc:
             logger.warning("Failed to broadcast claim event to Socket.IO: %r", exc)
 
@@ -467,7 +479,7 @@ class ChatService:
         conversation.status = ConversationStatus.AI
         conversation.assigned_agent_id = None
 
-        await self._repository.create_message(
+        system_msg = await self._repository.create_message(
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             role=MessageRole.SYSTEM,
@@ -490,6 +502,18 @@ class ChatService:
                 {"conversation_id": str(conversation_id)},
                 room=f"tenant_{tenant_id}_agents",
             )
+            await sio.emit(
+                "new_message",
+                {
+                    "id": str(system_msg.id),
+                    "conversation_id": str(conversation_id),
+                    "role": "system",
+                    "sender_type": "system",
+                    "content": "Conversation returned to AI assistant.",
+                    "created_at": datetime.now(UTC).isoformat(),
+                },
+                room=f"conv_{conversation_id}",
+            )
         except Exception as exc:
             logger.warning("Failed to broadcast release event to Socket.IO: %r", exc)
 
@@ -509,7 +533,7 @@ class ChatService:
         )
         conversation.status = ConversationStatus.RESOLVED
 
-        await self._repository.create_message(
+        system_msg = await self._repository.create_message(
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             role=MessageRole.SYSTEM,
@@ -529,6 +553,18 @@ class ChatService:
             }
             await sio.emit("status_change", status_payload, room=f"conv_{conversation_id}")
             await sio.emit("status_change", status_payload, room=f"tenant_{tenant_id}_agents")
+            await sio.emit(
+                "new_message",
+                {
+                    "id": str(system_msg.id),
+                    "conversation_id": str(conversation_id),
+                    "role": "system",
+                    "sender_type": "system",
+                    "content": "Conversation marked as resolved.",
+                    "created_at": datetime.now(UTC).isoformat(),
+                },
+                room=f"conv_{conversation_id}",
+            )
         except Exception as exc:
             logger.warning("Failed to broadcast resolve event to Socket.IO: %r", exc)
 
@@ -600,3 +636,19 @@ class ChatService:
                 budget=None,
                 preferred_location=None,
             )
+
+    # Delete Conversation & Cascade Messages
+    async def delete_conversation(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+    ) -> bool:
+        deleted = await self._repository.delete_conversation(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+        )
+        if not deleted:
+            raise ConversationNotFoundError(f"Conversation {conversation_id} not found")
+        await self._repository._session.commit()
+        return True

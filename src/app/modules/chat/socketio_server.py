@@ -158,16 +158,27 @@ async def join_conversation(sid: str, data: dict[str, Any]) -> dict[str, Any]:
         return {"status": "error", "message": "Invalid conversation_id"}
 
     async with get_sessionmaker()() as db:
-        conv = await ChatRepository(db).get_conversation(
+        repo = ChatRepository(db)
+        conv = await repo.get_conversation(
             tenant_id=session["tenant_id"], conversation_id=conversation_id
         )
-    # Same message for "missing" and "not yours": don't leak which IDs exist.
+        # Auto-heal: If visitor conversation was purged, provision a fresh one
+        if (not conv or not _visitor_owns(conv, session)) and session["role"] == "visitor":
+            conv = await repo.create_conversation(
+                tenant_id=session["tenant_id"],
+                title="Website Visitor Inquiry",
+                metadata={"visitor_id": str(session["user_id"]), "source": "embed_widget"},
+            )
+            await db.commit()
+            conversation_id = conv.id
+            await sio.emit("conversation_recreated", {"conversation_id": str(conversation_id)}, room=sid)
+
     if not conv or not _visitor_owns(conv, session):
         return {"status": "error", "message": "Conversation not found"}
 
     conv_room = f"conv_{conversation_id}"
     await sio.enter_room(sid, conv_room)
-    return {"status": "ok", "room": conv_room}
+    return {"status": "ok", "room": conv_room, "conversation_id": str(conversation_id)}
 
 
 # ==============================================================================
@@ -213,8 +224,19 @@ async def _handle_visitor_message(
     async with get_sessionmaker()() as db:
         repo = ChatRepository(db)
         conv = await repo.get_conversation(tenant_id=tenant_id, conversation_id=conversation_id)
+        # Auto-heal: If deleted while visitor was active, recreate on the fly
         if not conv or not _visitor_owns(conv, session):
-            return {"status": "error", "message": "Conversation not found"}
+            conv = await repo.create_conversation(
+                tenant_id=tenant_id,
+                title="Website Visitor Inquiry",
+                metadata={"visitor_id": str(session["user_id"]), "source": "embed_widget"},
+            )
+            conversation_id = conv.id
+            conv_id = str(conversation_id)
+            conv_room = f"conv_{conv_id}"
+            await sio.enter_room(sid, conv_room)
+            await sio.emit("conversation_recreated", {"conversation_id": conv_id}, room=sid)
+
         msg = await repo.create_message(
             tenant_id=tenant_id,
             conversation_id=conversation_id,

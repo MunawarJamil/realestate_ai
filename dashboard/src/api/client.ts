@@ -332,6 +332,14 @@ export const apiClient = {
         body: JSON.stringify(payload),
       });
     },
+    
+    async deleteConversation(id: string): Promise<null> {
+      return request<null>(`/api/v1/chat/conversations/${id}`, {
+        method: 'DELETE',
+        auth: 'agency',
+      });
+    },
+
 
     async listMessages(
       conversationId: string,

@@ -264,15 +264,18 @@ export function getWidgetStyles(config?: Partial<WidgetConfig>): string {
 
     .re-msg-system {
       align-self: center;
-      background: rgba(255, 255, 255, 0.04);
-      color: #94A3B8;
-      font-size: 11.5px;
-      padding: 6px 14px;
+      background: rgba(255, 255, 255, 0.05);
+      color: #CBD5E1;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 5px 14px;
       border-radius: var(--radius-full);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      max-width: 92%;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      max-width: 90%;
       text-align: center;
-      margin: 4px 0;
+      margin: 6px 0;
+      letter-spacing: 0.1px;
+      line-height: 1.4;
     }
 
     /* Typing Indicator */
