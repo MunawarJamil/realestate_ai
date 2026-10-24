@@ -21,6 +21,7 @@ class RealEstateWidgetController {
   private accumulatedStreamContent = ''; // # 12b HITL
   private state: WidgetState;
   private currentStreamController: AbortController | null = null;
+  private typingTimer: any = null;
 
   constructor(config: WidgetConfig) {
     this.config = config;
@@ -73,11 +74,24 @@ class RealEstateWidgetController {
       this.close();
     });
 
-    // Input text validation
+    // Input text validation & typing emit
     this.elements.input.addEventListener('input', () => {
       if (!this.elements) return;
       const hasText = this.elements.input.value.trim().length > 0;
       this.elements.sendBtn.disabled = !hasText || this.state.isStreaming;
+
+      if (this.socketClient?.isConnected()) {
+        if (hasText) {
+          this.socketClient.sendTyping(true);
+          if (this.typingTimer) clearTimeout(this.typingTimer);
+          this.typingTimer = setTimeout(() => {
+            this.socketClient?.sendTyping(false);
+          }, 2000);
+        } else {
+          if (this.typingTimer) clearTimeout(this.typingTimer);
+          this.socketClient.sendTyping(false);
+        }
+      }
     });
 
     // Enter key to send
@@ -198,22 +212,46 @@ class RealEstateWidgetController {
           }
         }
       } else {
-        const greeting =
-          this.config.greeting ||
-          `Hello! Welcome to ${this.state.session?.tenant_name || 'our real estate agency'}. How can I assist you with properties or pricing today?`;
-        this.appendMessage(
-          {
-            id: 'greeting',
-            role: 'assistant',
-            sender_type: 'ai',
-            content: greeting,
-          },
-          true
-        );
+        this.renderGreeting();
       }
-    } catch (err) {
-      console.warn('[RealEstateAI Widget] Failed to load messages history:', err);
+    } catch (err: unknown) {
+      console.warn('[RealEstateAI Widget] Conversation deleted or expired on server, creating fresh thread:', err);
+      // Auto-heal: reset dead conversation and provision a new one
+      this.state.conversationId = null;
+      this.state.messages = [];
+      if (this.elements) {
+        this.elements.messagesContainer.innerHTML = '';
+      }
+      if (this.state.session) {
+        try {
+          const conv = await this.api.createConversation(
+            this.state.session.visitor_token,
+            'Website Visitor Inquiry'
+          );
+          this.state.conversationId = conv.id;
+          this.storage.saveSession(this.state.session, conv.id);
+          this.initWebSocket();
+          this.renderGreeting();
+        } catch (createErr) {
+          console.error('[RealEstateAI Widget] Failed to create replacement conversation', createErr);
+        }
+      }
     }
+  }
+
+  private renderGreeting(): void {
+    const greeting =
+      this.config.greeting ||
+      `Hello! Welcome to ${this.state.session?.tenant_name || 'our real estate agency'}. How can I assist you with properties or pricing today?`;
+    this.appendMessage(
+      {
+        id: 'greeting',
+        role: 'assistant',
+        sender_type: 'ai',
+        content: greeting,
+      },
+      true
+    );
   }
 
   // # 12c HITL - Socket.IO Real-Time Gateway
@@ -249,6 +287,25 @@ class RealEstateWidgetController {
           }
 
           this.appendMessage(msg, true);
+        },
+        onStatusChange: (data: { status: any; agent_name?: string }) => {
+          if (data?.status) {
+            this.updateStatusBadge(data.status);
+          }
+        },
+        onConversationRecreated: (data: { conversation_id: string }) => {
+          console.log('[RealEstateAI Widget] Conversation recreated:', data.conversation_id);
+          this.state.conversationId = data.conversation_id;
+          if (this.state.session) {
+            this.storage.saveSession(this.state.session, data.conversation_id);
+          }
+        },
+        onTyping: (data: { is_typing: boolean; sender: string }) => {
+          if (data.is_typing) {
+            this.showTypingIndicator(data.sender);
+          } else {
+            this.hideTypingIndicator();
+          }
         },
         onError: (err: Error) => {
           console.warn('[RealEstateAI Widget] Socket.IO notice:', err);
@@ -300,6 +357,8 @@ class RealEstateWidgetController {
     // Clear input and disable button
     this.elements.input.value = '';
     this.elements.sendBtn.disabled = true;
+    if (this.typingTimer) clearTimeout(this.typingTimer);
+    this.socketClient?.sendTyping(false);
 
     // Ensure session is active
     const ready = await this.ensureSession();
@@ -405,7 +464,8 @@ class RealEstateWidgetController {
         <div>${renderMarkdown(msg.content)}</div>
       `;
     } else if (msg.sender_type === 'system' || msg.role === 'system') {
-      bubble.textContent = msg.content;
+      const cleanContent = msg.content.replace(/^ℹ️\s*/, '').trim();
+      bubble.textContent = `ℹ️ ${cleanContent}`;
     } else {
       bubble.innerHTML =
         msg.role === 'assistant' ? renderMarkdown(msg.content) : this.escapeText(msg.content);
@@ -436,12 +496,19 @@ class RealEstateWidgetController {
     this.scrollToBottom();
   }
 
-  private showTypingIndicator(): void {
+  private showTypingIndicator(sender?: string): void {
     this.hideTypingIndicator();
     const typing = document.createElement('div');
     typing.id = 're-active-typing';
     typing.className = 're-typing';
+    const label =
+      sender === 'agent'
+        ? '<span style="font-size:11px;font-weight:600;color:#60A5FA;margin-right:4px;">👤 Advisor is typing</span>'
+        : sender === 'ai'
+        ? '<span style="font-size:11px;font-weight:600;color:#F97316;margin-right:4px;">🤖 AI is typing</span>'
+        : '';
     typing.innerHTML = `
+      ${label}
       <span class="re-typing-dot"></span>
       <span class="re-typing-dot"></span>
       <span class="re-typing-dot"></span>

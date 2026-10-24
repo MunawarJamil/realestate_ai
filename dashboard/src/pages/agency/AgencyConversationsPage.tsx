@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+
 import {
   Search,
   CheckCircle2,
@@ -11,6 +12,8 @@ import {
   ChevronLeft,
   RefreshCw,
   Plus,
+  MoreVertical,
+  Trash2,
   AlertCircle,
   MessageSquare,
   UserCheck,
@@ -70,6 +73,13 @@ function mapBackendMessage(msg: BackendMessage): Message {
 export const AgencyConversationsPage: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+    const selectedIdRef = useRef<string | null>(selectedId);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+
   const [isLoadingList, setIsLoadingList] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
@@ -85,8 +95,25 @@ export const AgencyConversationsPage: React.FC = () => {
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [showSummaryDrawer, setShowSummaryDrawer] = useState(false);
   const [agentWsConnected, setAgentWsConnected] = useState(false);
+
+
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
+
+  // Close three-dots dropdown menu when clicking anywhere outside
+  useEffect(() => {
+    const handleOutsideClick = () => setOpenMenuId(null);
+    window.addEventListener('click', handleOutsideClick);
+    return () => window.removeEventListener('click', handleOutsideClick);
+  }, []);
+
+
+
+
   const [liveHandoffAlert, setLiveHandoffAlert] = useState<{ conversation_id: string; snippet: string } | null>(null);
+  const [typingMap, setTypingMap] = useState<Record<string, { isTyping: boolean; sender: string }>>({});
   const agentWsRef = useRef<AgentSocketClient | null>(null);
+  const agentTypingTimerRef = useRef<any>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -99,19 +126,34 @@ export const AgencyConversationsPage: React.FC = () => {
     setTimeout(() => setActionNotice(null), 3500);
   };
 
-  // 1. Fetch Conversations List
+  // 1. Fetch Conversations List (Runs only on mount, merges safely with live state)
   const fetchConversations = useCallback(async () => {
     setIsLoadingList(true);
     setErrorBanner(null);
     try {
       const res = await apiClient.agency.listConversations({ limit: 50 });
       const mapped = res.items.map((c) => mapBackendConversation(c, []));
-      setConversations(mapped);
 
-      // Select first conversation if none selected
-      if (mapped.length > 0 && !selectedId) {
-        setSelectedId(mapped[0].id);
-      }
+      setConversations((prev) => {
+        // Create lookup to preserve loaded messages & unread counts
+        const prevMap = new Map(prev.map((c) => [c.id, c]));
+        return mapped.map((c) => {
+          const existing = prevMap.get(c.id);
+          if (existing) {
+            return {
+              ...c,
+              messages: existing.messages.length > 0 ? existing.messages : c.messages,
+              last_message_preview: existing.last_message_preview,
+              last_message_sender: existing.last_message_sender,
+              unread_count: existing.unread_count ?? 0,
+            };
+          }
+          return c;
+        });
+      });
+
+      // Select first conversation only if nothing is currently selected
+      setSelectedId((curr) => curr || (mapped.length > 0 ? mapped[0].id : null));
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         setErrorBanner(`Failed to load conversations (${err.status}): ${err.message}`);
@@ -121,11 +163,85 @@ export const AgencyConversationsPage: React.FC = () => {
     } finally {
       setIsLoadingList(false);
     }
-  }, [selectedId]);
+  }, []); // <-- Empty array: Never re-fetch just because selectedId changed
 
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
+
+
+
+
+    const handleIncomingMessage = useCallback((msg: BackendMessage) => {
+    setConversations((prev) => {
+      const mappedMsg = mapBackendMessage(msg);
+      const targetIndex = prev.findIndex((c) => c.id === msg.conversation_id);
+      const isCurrentActive = selectedIdRef.current === msg.conversation_id;
+
+      if (targetIndex === -1) {
+        // Prepend brand new conversation from incoming visitor
+        const newConv: Conversation = {
+          id: msg.conversation_id,
+          visitor_name: `Visitor ${msg.conversation_id.slice(0, 6)}`,
+          visitor_location: 'Online Visitor',
+          intent: 'Property Inquiry',
+          budget: 'Pending Inquiry',
+          property_interest: 'General Inquiry',
+          status: 'ai',
+          started_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          last_message_at: mappedMsg.created_at,
+          last_message_preview: mappedMsg.content,
+          last_message_sender: msg.sender_type || (msg.role === 'user' ? 'visitor' : 'ai'),
+          tags: ['Live Web Widget'],
+          messages: [mappedMsg],
+          unread_count: isCurrentActive ? 0 : 1,
+        };
+        return [newConv, ...prev];
+      }
+
+          const targetConv = prev[targetIndex];
+
+      // Check if message already exists by ID, OR matches an optimistic agent message
+      const existingIndex = targetConv.messages.findIndex(
+        (m) =>
+          m.id === msg.id ||
+          (msg.sender_type === 'agent' &&
+            m.sender_type === 'agent' &&
+            m.id.startsWith('agt-') &&
+            m.content === msg.content)
+      );
+
+      let updatedMessages: Message[];
+      if (existingIndex !== -1) {
+        // Replace optimistic placeholder with confirmed server message (adopting real UUID)
+        updatedMessages = targetConv.messages.map((m, idx) =>
+          idx === existingIndex ? mappedMsg : m
+        );
+      } else {
+        updatedMessages = [...targetConv.messages, mappedMsg];
+      }
+
+
+      const updatedConv: Conversation = {
+        ...targetConv,
+        last_message_at: mappedMsg.created_at,
+        last_message_preview: mappedMsg.content,
+        last_message_sender: msg.sender_type || (msg.role === 'user' ? 'visitor' : 'ai'),
+        messages: updatedMessages,
+        unread_count: isCurrentActive
+          ? 0
+          : (targetConv.unread_count || 0) + (msg.sender_type === 'agent' ? 0 : 1),
+      };
+
+      // WhatsApp Reorder: prepend to index 0 (top)
+      const remaining = prev.filter((_, idx) => idx !== targetIndex);
+      return [updatedConv, ...remaining];
+    });
+
+    if (selectedIdRef.current === msg.conversation_id) {
+      setTimeout(scrollToBottom, 60);
+    }
+  }, []);
 
 
     // # 12c HITL - Connect Agency Agent Socket.IO for real-time live two-way messaging
@@ -138,41 +254,18 @@ export const AgencyConversationsPage: React.FC = () => {
         setAgentWsConnected(false);
       },
       onMessage: (msg) => {
-        setConversations((prev) =>
-          prev.map((c) => {
-            if (c.id === msg.conversation_id) {
-              const mapped = mapBackendMessage(msg);
-              const exists = c.messages.some((m) => m.id === msg.id);
-              if (exists) return c;
-              return {
-                ...c,
-                last_message_at: mapped.created_at,
-                messages: [...c.messages, mapped],
-              };
-            }
-            return c;
-          })
-        );
-        setTimeout(scrollToBottom, 60);
+        handleIncomingMessage(msg);
       },
       onVisitorActivity: (msg) => {
-        // Update sidebar preview for other conversations
-        setConversations((prev) =>
-          prev.map((c) => {
-            if (c.id === msg.conversation_id) {
-              const mapped = mapBackendMessage(msg);
-              const exists = c.messages.some((m) => m.id === msg.id);
-              if (exists) return c;
-              return {
-                ...c,
-                last_message_at: mapped.created_at,
-                messages: [...c.messages, mapped],
-              };
-            }
-            return c;
-          })
-        );
+        handleIncomingMessage(msg);
       },
+      onTyping: (data: { conversation_id: string; is_typing: boolean; sender: string }) => {
+        setTypingMap((prev) => ({
+          ...prev,
+          [data.conversation_id]: { isTyping: data.is_typing, sender: data.sender },
+        }));
+      },
+
       onError: (err) => {
         console.warn('[RealEstateAI Agent Socket.IO] Notice:', err);
       },
@@ -184,7 +277,7 @@ export const AgencyConversationsPage: React.FC = () => {
     return () => {
       socket.disconnect();
     };
-  }, [fetchConversations]);
+  }, []);
 
 
   // 2. Fetch Messages for Selected Conversation
@@ -326,6 +419,49 @@ export const AgencyConversationsPage: React.FC = () => {
       const msg = err instanceof ApiError ? err.message : 'Failed to create conversation';
       alert(`Error creating conversation: ${msg}`);
     }
+
+
+
+  };
+    const handleDeleteConversation = async (convId: string) => {
+    if (!window.confirm('Are you sure you want to delete this conversation? This will permanently delete all messages.')) {
+      return;
+    }
+
+    setIsDeletingId(convId);
+    try {
+      await apiClient.agency.deleteConversation(convId);
+      setConversations((prev) => {
+        const next = prev.filter((c) => c.id !== convId);
+        if (selectedId === convId) {
+          setSelectedId(next.length > 0 ? next[0].id : null);
+        }
+        return next;
+      });
+      showNotification('Conversation deleted successfully.');
+    } catch (err: unknown) {
+      const msg = err instanceof ApiError ? err.message : 'Failed to delete conversation';
+      alert(`Could not delete conversation: ${msg}`);
+    } finally {
+      setIsDeletingId(null);
+    }
+  };
+  const handleReplyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setReplyText(val);
+
+    if (selectedId && agentWsRef.current?.isConnected()) {
+      if (val.trim().length > 0) {
+        agentWsRef.current.sendTyping(selectedId, true);
+        if (agentTypingTimerRef.current) clearTimeout(agentTypingTimerRef.current);
+        agentTypingTimerRef.current = setTimeout(() => {
+          if (selectedId) agentWsRef.current?.sendTyping(selectedId, false);
+        }, 2000);
+      } else {
+        if (agentTypingTimerRef.current) clearTimeout(agentTypingTimerRef.current);
+        agentWsRef.current.sendTyping(selectedId, false);
+      }
+    }
   };
 
   // 4. Send Message (Strictly Human Agent Reply)
@@ -337,6 +473,8 @@ export const AgencyConversationsPage: React.FC = () => {
 
     const messageContent = replyText.trim();
     setReplyText('');
+    if (agentTypingTimerRef.current) clearTimeout(agentTypingTimerRef.current);
+    if (selectedConv) agentWsRef.current?.sendTyping(selectedConv.id, false);
 
     const timestampStr = new Date().toLocaleTimeString([], {
       hour: '2-digit',
@@ -503,6 +641,7 @@ export const AgencyConversationsPage: React.FC = () => {
 
             {/* # 12b HITL - Status Filter Pills */}
             <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+              
               {[
                 { id: 'all', label: 'All' },
                 { id: 'handoff_requested', label: '🚨 Handoffs' },
@@ -552,7 +691,12 @@ export const AgencyConversationsPage: React.FC = () => {
                     onClick={() => {
                       setSelectedId(conv.id);
                       setShowMobileList(false);
+                      // Clear unread badge on open
+                      setConversations((prev) =>
+                        prev.map((c) => (c.id === conv.id ? { ...c, unread_count: 0 } : c))
+                      );
                     }}
+
                     className={`p-3 transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-white/[0.05] border-l-2 border-[#F97316]'
@@ -563,10 +707,53 @@ export const AgencyConversationsPage: React.FC = () => {
                       <span className="font-semibold text-xs text-white truncate">
                         {conv.visitor_name}
                       </span>
-                      <span className="text-[10px] text-zinc-500 shrink-0 font-mono">
-                        {conv.last_message_at}
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] text-zinc-500 font-mono">
+                          {conv.last_message_at}
+                        </span>
+                        {Boolean(conv.unread_count && conv.unread_count > 0) && (
+                          <span className="inline-flex items-center justify-center bg-[#F97316] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] h-[18px] shadow-sm animate-pulse">
+                            {conv.unread_count}
+                          </span>
+                        )}
+
+                        {/* Three Vertical Dots Dropdown */}
+                        <div className="relative">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuId((curr) => (curr === conv.id ? null : conv.id));
+                            }}
+                            className="p-1 rounded hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                            title="Chat options"
+                          >
+                            <MoreVertical className="w-3.5 h-3.5" />
+                          </button>
+
+                          {openMenuId === conv.id && (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="absolute right-0 top-6 z-30 w-36 bg-[#1A1A1E] border border-white/10 rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95"
+                            >
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenMenuId(null);
+                                  handleDeleteConversation(conv.id);
+                                }}
+                                disabled={isDeletingId === conv.id}
+                                className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300 flex items-center gap-2 cursor-pointer transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>{isDeletingId === conv.id ? 'Deleting...' : 'Delete Chat'}</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
                     </div>
+
 
                     <div className="text-[11px] text-[#F97316] font-medium mb-1 truncate">
                       {conv.property_interest}
@@ -574,15 +761,26 @@ export const AgencyConversationsPage: React.FC = () => {
 
                     {/* Clean 1-Line Message Preview */}
                     <p className="text-[11px] text-zinc-400 truncate mb-1.5">
-                      {lastMsg ? (
+                      {typingMap[conv.id]?.isTyping && typingMap[conv.id]?.sender === 'visitor' ? (
+                        <span className="text-amber-400 font-medium italic animate-pulse flex items-center gap-1">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping mr-0.5" />
+                          Typing...
+                        </span>
+                      ) : lastMsg ? (
                         <>
                           {lastMsg.sender_type === 'agent' ? 'You: ' : lastMsg.role === 'assistant' ? 'AI: ' : ''}
                           {lastMsg.content}
+                        </>
+                      ) : conv.last_message_preview ? (
+                        <>
+                          {conv.last_message_sender === 'agent' ? 'You: ' : conv.last_message_sender === 'ai' ? 'AI: ' : ''}
+                          {conv.last_message_preview}
                         </>
                       ) : (
                         <span className="italic text-zinc-600">No messages yet</span>
                       )}
                     </p>
+
 
                     <div className="flex items-center justify-between text-[10px]">
                       <span className="font-mono text-zinc-400 bg-[#0B0B0D] px-1.5 py-0.5 rounded border border-white/5 truncate max-w-[110px]">
@@ -909,36 +1107,48 @@ export const AgencyConversationsPage: React.FC = () => {
                 </Button>
               </div>
             ) : (
-              <form
-                onSubmit={handleSendMessage}
-                className="p-3 sm:p-3.5 border-t border-white/8 bg-[#121215] flex items-center gap-2 sm:gap-3 shrink-0"
-              >
-                <input
-                  type="text"
-                  value={replyText}
-                  onChange={(e) => setReplyText(e.target.value)}
-                  placeholder={
-                    selectedConv.status === 'human_active'
-                      ? 'Type a message to reply live to the visitor...'
-                      : selectedConv.status === 'handoff_requested'
-                      ? 'Reply to claim and join live conversation with visitor...'
-                      : 'Reply to take over conversation from AI...'
-                  }
-                  className="flex-1 px-3.5 py-2 sm:py-2.5 bg-[#0B0B0D] border border-white/10 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#F97316]"
-                />
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="md"
-                  disabled={!replyText.trim()}
-                  className="shrink-0 cursor-pointer"
+              <div className="border-t border-white/8 bg-[#121215] shrink-0">
+                {typingMap[selectedConv.id]?.isTyping && typingMap[selectedConv.id]?.sender === 'visitor' && (
+                  <div className="px-4 py-1.5 border-b border-white/5 flex items-center gap-2 text-[11px] text-amber-400 animate-pulse bg-amber-500/5">
+                    <span className="flex gap-1 items-center">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce [animation-delay:0.2s]" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce [animation-delay:0.4s]" />
+                    </span>
+                    <span><strong>{selectedConv.visitor_name}</strong> is typing...</span>
+                  </div>
+                )}
+                <form
+                  onSubmit={handleSendMessage}
+                  className="p-3 sm:p-3.5 flex items-center gap-2 sm:gap-3"
                 >
-                  <Send className="w-3.5 h-3.5 mr-1" />
-                  <span>
-                    {selectedConv.status === 'human_active' ? 'Reply' : 'Claim & Reply'}
-                  </span>
-                </Button>
-              </form>
+                  <input
+                    type="text"
+                    value={replyText}
+                    onChange={handleReplyChange}
+                    placeholder={
+                      selectedConv.status === 'human_active'
+                        ? 'Type a message to reply live to the visitor...'
+                        : selectedConv.status === 'handoff_requested'
+                        ? 'Reply to claim and join live conversation with visitor...'
+                        : 'Reply to take over conversation from AI...'
+                    }
+                    className="flex-1 px-3.5 py-2 sm:py-2.5 bg-[#0B0B0D] border border-white/10 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#F97316]"
+                  />
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="md"
+                    disabled={!replyText.trim()}
+                    className="shrink-0 cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5 mr-1" />
+                    <span>
+                      {selectedConv.status === 'human_active' ? 'Reply' : 'Claim & Reply'}
+                    </span>
+                  </Button>
+                </form>
+              </div>
             )}
           </div>
         ) : (

@@ -38,13 +38,18 @@ export interface Conversation {
   budget: string;
   property_interest: string;
   status: ConversationStatus;
-  assigned_agent_id?: string | null; // # 12b HITL
-  summary?: BackendConversationSummary | null; // # 12b HITL
+  assigned_agent_id?: string | null;
+  summary?: BackendConversationSummary | null;
   started_at: string;
   last_message_at: string;
+  last_message_preview?: string; // Persists last snippet
+  last_message_sender?: string;  // 'visitor' | 'agent' | 'ai'
   tags: string[];
   messages: Message[];
+  unread_count?: number;
 }
+
+
 
 export type LeadStatus = 'new' | 'contacted' | 'viewing_scheduled' | 'closed';
 

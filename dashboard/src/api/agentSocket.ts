@@ -108,6 +108,15 @@ export class AgentSocketClient {
     return true;
   }
 
+  public sendTyping(conversationId: string, isTyping: boolean): boolean {
+    if (!this.socket || !this.socket.connected) return false;
+    this.socket.emit('typing', {
+      conversation_id: conversationId,
+      is_typing: isTyping,
+    });
+    return true;
+  }
+
   public isConnected(): boolean {
     return !!(this.socket && this.socket.connected);
   }

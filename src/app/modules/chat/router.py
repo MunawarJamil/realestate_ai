@@ -276,3 +276,21 @@ async def get_conversation_summary(
     except ChatError as exc:
         _raise_http(exc)
 
+
+
+@router.delete(
+    "/conversations/{conversation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_conversation(
+    conversation_id: uuid.UUID,
+    tenant: Tenant = Depends(get_current_tenant),
+    service: ChatService = Depends(get_chat_service),
+) -> None:
+    try:
+        await service.delete_conversation(
+            tenant_id=tenant.id,
+            conversation_id=conversation_id,
+        )
+    except ChatError as exc:
+        _raise_http(exc)
