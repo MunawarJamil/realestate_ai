@@ -1,7 +1,9 @@
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
+from langsmith import traceable
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from app.integrations.embeddings.base import EmbeddingProvider
@@ -23,6 +25,27 @@ class RetrievedChunk:
     score: float
 
 
+def _format_retriever_output(output: Any) -> dict[str, Any]:
+    """Render chunks in LangSmith's native retriever 'Documents' view."""
+    chunks = output if isinstance(output, list) else output.get("output", [])
+    return {
+        "documents": [
+            {
+                "page_content": c.text,
+                "type": "Document",
+                "metadata": {
+                    "document_id": str(c.document_id),
+                    "title": c.document_title,
+                    "page": c.page_number,
+                    "chunk_index": c.chunk_index,
+                    "score": round(c.score, 4),
+                },
+            }
+            for c in chunks
+        ]
+    }
+
+
 class RetrievalService:
     """Semantic search over one tenant's knowledge base."""
 
@@ -41,6 +64,11 @@ class RetrievalService:
         self._default_limit = default_limit
         self._score_threshold = score_threshold
 
+    @traceable(
+        run_type="retriever",
+        name="qdrant_retrieval",
+        process_outputs=_format_retriever_output,
+    )
     async def search(
         self, *, tenant_id: uuid.UUID, query: str, limit: int | None = None
     ) -> list[RetrievedChunk]:
