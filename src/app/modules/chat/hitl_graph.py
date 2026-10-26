@@ -501,11 +501,27 @@ def build_hitl_graph(
     if checkpointer is None:
         logger.warning("No checkpointer given, using in-memory MemorySaver (DEV ONLY)")
         checkpointer = MemorySaver()
+    workflow = make_hitl_workflow(retrieval_service=retrieval_service, llm=llm, cfg=cfg)
+    return workflow.compile(checkpointer=checkpointer)
+
+
+def make_hitl_workflow(
+    retrieval_service: SearchService | None = None,
+    llm: LLMProvider | None = None,
+    cfg: HitlConfig = DEFAULT_CONFIG,
+) -> StateGraph:
+    """Constructs the uncompiled StateGraph (used by LangGraph Studio and production)."""
+    if llm is None:
+        from app.core.config import get_settings
+        from app.integrations.llm.client import build_llm_client
+        llm = build_llm_client(get_settings())
+
     workflow: StateGraph = StateGraph(cast(Any, AgentState))
     workflow.add_node("intent_router", make_intent_router_node(cfg))
     workflow.add_node("human_review", human_review_node)
     workflow.add_node("smalltalk_agent", make_smalltalk_node(llm, cfg))
     workflow.add_node("rag_agent", make_rag_node(llm, retrieval_service, cfg))
+
     workflow.add_edge(START, "intent_router")
     workflow.add_conditional_edges(
         "intent_router",
@@ -519,8 +535,7 @@ def build_hitl_graph(
     workflow.add_edge("human_review", END)
     workflow.add_edge("smalltalk_agent", END)
     workflow.add_edge("rag_agent", END)
-    return workflow.compile(checkpointer=checkpointer)
-
+    return workflow
 
 # Runtime helpers: thread config, per-conversation lock, running a turn
 
@@ -594,7 +609,7 @@ async def run_turn(
             tenant_id,
             conversation_id,
             assigned_agent_id=turn_input.get("assigned_agent_id"),
-        )
+         )
         result = await graph.ainvoke(turn_input, config=config)
         return cast(dict[str, Any], result)
 
@@ -637,3 +652,7 @@ async def record_human_agent_message(
             },
             as_node="human_review",
         )
+
+
+# Studio entrypoint instance
+builder = make_hitl_workflow()

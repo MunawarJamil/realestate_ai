@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator, Sequence
 from typing import cast
+from langsmith.wrappers import wrap_openai
 
 import openai
 from openai import AsyncOpenAI
@@ -126,7 +127,7 @@ def build_llm_client(settings: Settings) -> OpenRouterLLMClient:
         max_retries=settings.llm_max_retries,
     )
     return OpenRouterLLMClient(
-        client=sdk,
+        client=wrap_openai(sdk),
         model=settings.llm_model,
         default_max_tokens=settings.llm_max_tokens,
         default_temperature=settings.llm_temperature,
