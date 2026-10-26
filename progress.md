@@ -1,9 +1,9 @@
 # PROJECT PROGRESS TRACKER (progress.md)
 
-> **Last Updated**: 2026-10-20  
-> **Current Phase**: Phase 12 (Socket.IO + LangGraph HITL + Verification Completed ✅) ➔ Next: Phase 13 (CRM Leads Pipeline & Webhook Integrations)  
-> **Status**: Phase 12 100% Tested & Verified via Automated PowerShell Suite  
-> **Current File Context**: [`src/app/modules/chat/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/chat/) & [`scratch/test_lifecycle.ps1`](file:///C:/Users/HP/.gemini/antigravity-ide/brain/f6d7e5db-9cc7-4a63-be34-6cb9a0b753d7/scratch/test_lifecycle.ps1)
+> **Last Updated**: 2026-10-25  
+> **Current Phase**: Phase 13 (CRM Qualified Leads Pipeline & Auto-Qualification Engine)  
+> **Status**: LangSmith Observability & HITL Socket.IO Complete ✅  
+> **Current File Context**: [`src/app/modules/leads/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/leads/) & [`src/app/modules/chat/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/chat/)
 
 ---
 
@@ -328,6 +328,85 @@
   - Validated Step 8: AI Handover Executive Brief (`GET /api/v1/chat/conversations/{id}/summary`) -> LLM extracted structured intent (`Luxury Villa`), location (`Dabouq, Amman`), and budget (`JOD 285,000`).
   - Validated Step 9: Agent Resolution (`POST /api/v1/chat/conversations/{id}/resolve`) -> Transitioned conversation to `resolved`.
   - Validated Step 10: Multi-Tenant Conversation Listing (`GET /api/v1/chat/conversations`) -> Verified state persistence and listing in tenant workspace.
+- [x] **Phase 12g: Real-Time Polish & LangSmith Production Tracing (COMPLETED ✅)**:
+  - Multi-tenant LangSmith trace metadata injection (`tenant_id`, `conversation_id`, `assigned_agent_id`) and tags (`visitor_turn`, `agent_turn`, `tenant:<id>`) in `hitl_graph.py`.
+  - Settings & environment synchronization via `_export_langsmith_env` in `config.py` for cloud tracing without CLI wrappers.
+  - Bidirectional typing indicators across visitor widget, agency dashboard, and AI assistant.
+  - Three-vertical-dots conversation deletion with database cascade and auto-healing on stale client sessions.
+  - Optimistic message ID reconciliation preventing duplicate chat bubbles on agent replies.
+
+---
+
+## 🚀 Enterprise Scalability Roadmap (Phases 13 - 17)
+
+### [ ] Phase 13: CRM Qualified Leads Pipeline & Auto-Qualification Engine
+- [ ] **13.1 Database Architecture & Alembic Migration**:
+  - `Lead` SQLAlchemy model in `src/app/modules/leads/models.py` (`id`, `tenant_id`, `conversation_id`, `contact_name`, `email`, `phone`, `budget_min`, `budget_max`, `preferred_location`, `status`, `ai_score`, `score_breakdown`, `notes`, `created_at`).
+  - Indexing on `(tenant_id, status)` and `(tenant_id, ai_score)`.
+- [ ] **13.2 Pydantic Schemas, Repository & Service Layer**:
+  - `src/app/modules/leads/schemas.py`, `repository.py`, and `service.py`.
+  - CRUD operations with tenant scoping and status transitions (`new`, `contacted`, `qualified`, `lost`, `closed`).
+- [ ] **13.3 Autonomous LLM Structured Lead Extraction**:
+  - Background extraction worker inspecting conversation turns.
+  - Pydantic function calling extracting budget, timeline, location, and contact info.
+  - Heuristic + LLM lead scoring algorithm assigning 0-100 score (`Hot >= 85`, `Warm 70-84`, `Cold < 70`).
+- [ ] **13.4 Real-time Socket.IO Broadcasts & Alerts**:
+  - Emit `lead_created` and `lead_updated` events to agency room (`tenant_{id}_agents`).
+  - Browser notification trigger for brokers on newly captured Hot Leads.
+- [ ] **13.5 Agency Leads Dashboard Wiring**:
+  - Connect `AgencyLeadsPage.tsx` to `/api/v1/leads` endpoints.
+  - Filter by score, status, date, and export to CSV.
+
+---
+
+### [ ] Phase 14: Autonomous Agentic Tool Calling (Transactional Actions)
+- [ ] **14.1 Property Viewing Booking Tool**:
+  - Tool `schedule_viewing(property_id, visitor_name, phone, preferred_time)`.
+  - Records appointments and alerts assigned agent.
+- [ ] **14.2 Real Estate Financial Calculator Tool**:
+  - Tool `calculate_mortgage(property_price, down_payment, interest_rate, term_years)`.
+  - Provides instant breakdown (monthly EMI, total interest, principal).
+- [ ] **14.3 Structured Inventory Query Tool**:
+  - Tool `query_property_catalog(min_price, max_price, location, bedrooms)`.
+  - Performs direct SQL/relational queries for exact filter matches alongside semantic search.
+- [ ] **14.4 LangGraph Tool Node & Router Loop**:
+  - Bind tools to LangGraph agents with validation and structured action execution.
+
+---
+
+### [ ] Phase 15: Production Hybrid RAG & Cross-Encoder Re-Ranking
+- [ ] **15.1 Hybrid Search Engine**:
+  - Combine Qdrant Dense Semantic Vectors with PostgreSQL Full-Text/BM25 Search.
+  - Reciprocal Rank Fusion (RRF) to merge keyword and semantic matches.
+- [ ] **15.2 Local Cross-Encoder Re-ranking**:
+  - Integrate `flashrank` or lightweight Cross-Encoder (`bge-reranker`).
+  - Re-score top 20 retrieved candidates to top 4 high-precision chunks, cutting LLM context cost and hallucinations.
+- [ ] **15.3 Dynamic Grounding Thresholds & RAG Guardrails**:
+  - Score threshold enforcement with graceful "out of inventory" domain-specific fallbacks.
+
+---
+
+### [ ] Phase 16: Omnichannel WhatsApp Gateway (Webhook Integration)
+- [ ] **16.1 Meta WhatsApp Cloud API Webhook**:
+  - Endpoint `POST /api/v1/webhooks/whatsapp` with challenge verification (`GET`).
+  - Signature verification (`X-Hub-Signature-256`) for payload security.
+- [ ] **16.2 Tenant Number Resolution & Session Mapping**:
+  - Map incoming WhatsApp business phone numbers to specific `tenant_id`.
+  - Auto-create or resume stateful conversation thread keyed by visitor phone.
+- [ ] **16.3 Bi-directional Routing & Broker Outbound Sync**:
+  - Route inbound messages through LangGraph HITL state machine.
+  - When broker replies from agency dashboard, dispatch outbound WhatsApp message via Meta Cloud API.
+
+---
+
+### [ ] Phase 17: Production AI Evals, Resilience & Token Metering
+- [ ] **17.1 Automated Offline RAG Evaluation Suite**:
+  - Continuous evaluation script using RAGAS / LLM-as-a-Judge.
+  - Benchmark Groundedness (Faithfulness), Answer Relevance, and Context Precision across 25 golden questions.
+- [ ] **17.2 LLM Circuit Breakers & Dynamic Multi-Provider Fallbacks**:
+  - Automatic fallback handler: OpenRouter $\rightarrow$ Groq / Google Gemini on 429/500/timeout.
+- [ ] **17.3 Per-Tenant Token Metering & Cost Tracking**:
+  - Track prompt and completion tokens per agency tenant in Redis/Postgres for SaaS billing and quota enforcement.
 
 
 
