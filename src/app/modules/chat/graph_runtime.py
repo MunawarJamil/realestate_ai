@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 _graph: CompiledStateGraph | None = None
 _pool: Any = None
 _llm: Any = None
-
+ 
 
 # ==============================================================================
 # Retrieval adapter (short-lived DB session per search)
@@ -190,3 +190,4 @@ async def sync_agent_message(
         )
     except Exception:
         logger.exception("[Graph] Failed to sync agent message: conv=%s", conversation_id)
+

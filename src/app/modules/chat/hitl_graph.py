@@ -526,14 +526,31 @@ def build_hitl_graph(
 
 
 def build_thread_config(
-    tenant_id: str | uuid.UUID, conversation_id: str | uuid.UUID
+    tenant_id: str | uuid.UUID,
+    conversation_id: str | uuid.UUID,
+    *,
+    assigned_agent_id: str | uuid.UUID | None = None,
+    tags: list[str] | None = None,
 ) -> RunnableConfig:
-    """Tenant-scoped thread id, so two tenants can never share a checkpoint."""
+    """Tenant-scoped thread id & LangSmith trace metadata."""
+    metadata = {
+        "tenant_id": str(tenant_id),
+        "conversation_id": str(conversation_id),
+    }
+    if assigned_agent_id:
+        metadata["assigned_agent_id"] = str(assigned_agent_id)
+
     return cast(
         RunnableConfig,
-        {"configurable": {"thread_id": f"{tenant_id}:{conversation_id}"}},
+        {
+            "configurable": {
+                "thread_id": f"{tenant_id}:{conversation_id}",
+            },
+            # 👇 LangSmith tracing attributes
+            "metadata": metadata,
+            "tags": tags or ["visitor_turn", f"tenant:{tenant_id}"],
+        },
     )
-
 
 @asynccontextmanager
 async def conversation_lock(
@@ -573,7 +590,11 @@ async def run_turn(
 ) -> dict[str, Any]:
     """Run one visitor turn. `turn_input` = make_initial_state(...) or make_turn_input(...)."""
     async with conversation_lock(redis, tenant_id, conversation_id, cfg):
-        config = build_thread_config(tenant_id, conversation_id)
+        config = build_thread_config(
+            tenant_id,
+            conversation_id,
+            assigned_agent_id=turn_input.get("assigned_agent_id"),
+        )
         result = await graph.ainvoke(turn_input, config=config)
         return cast(dict[str, Any], result)
 
@@ -593,7 +614,12 @@ async def record_human_agent_message(
     human_active, (3) puts the agent's words in graph history so the AI knows
     the context if it takes over later."""
     async with conversation_lock(redis, tenant_id, conversation_id, cfg):
-        config = build_thread_config(tenant_id, conversation_id)
+        config = build_thread_config(
+            tenant_id,
+            conversation_id,
+            assigned_agent_id=agent_id,
+            tags=["agent_turn", f"tenant:{tenant_id}"],
+        )
         await graph.aupdate_state(
             config,
             {

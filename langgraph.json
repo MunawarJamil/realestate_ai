@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "realestate_hitl": "./src/app/modules/chat/hitl_graph.py:builder"
+  },
+  "env": ".env"
+}
