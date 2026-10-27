@@ -10,7 +10,7 @@ import pytest
 from fastapi import FastAPI
 
 from app.modules.chat.dependencies import get_chat_service
-from app.modules.chat.enums import MessageRole
+from app.modules.chat.enums import ConversationStatus, MessageRole, SenderType
 from app.modules.chat.exceptions import ConversationNotFoundError, InvalidMessageError
 from app.modules.chat.models import Conversation, Message
 from app.modules.chat.router import router
@@ -25,6 +25,8 @@ def make_conversation(**overrides: Any) -> Conversation:
         "id": uuid.uuid4(),
         "tenant_id": TENANT.id,
         "title": "Apartment Inquiry",
+        "status": ConversationStatus.AI,
+        "assigned_agent_id": None,
         "metadata_": {"source": "web"},
         "created_at": NOW,
         "updated_at": NOW,
@@ -34,6 +36,8 @@ def make_conversation(**overrides: Any) -> Conversation:
     conv = Conversation(
         tenant_id=values["tenant_id"],
         title=values["title"],
+        status=values["status"],
+        assigned_agent_id=values["assigned_agent_id"],
         metadata_=meta,
     )
     conv.id = values["id"]
@@ -48,6 +52,8 @@ def make_message(**overrides: Any) -> Message:
         "conversation_id": uuid.uuid4(),
         "tenant_id": TENANT.id,
         "role": MessageRole.ASSISTANT,
+        "sender_type": SenderType.AI,
+        "agent_id": None,
         "content": "Prices start at $300,000.",
         "token_count": 10,
         "created_at": NOW,

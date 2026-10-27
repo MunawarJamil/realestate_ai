@@ -13,9 +13,13 @@ from app.modules.chat.exceptions import (
     InvalidMessageError,
 )
 from app.modules.chat.models import Conversation, Message
-from app.modules.chat.prompts import build_chat_messages
+from app.modules.chat.prompts import (
+    build_chat_messages,
+    build_query_condensation_messages,
+)
 from app.modules.chat.repository import ChatRepository
-from app.modules.knowledge.retrieval import RetrievalService
+from app.modules.chat.routing import should_skip_retrieval
+from app.modules.knowledge.retrieval import RetrievalService, RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +37,41 @@ class ChatService:
         self._repository = repository
         self._retrieval = retrieval
         self._llm = llm
+
+    async def _condense_query(
+        self,
+        *,
+        user_query: str,
+        history: Sequence[ChatMessage],
+    ) -> str:
+        """Rephrase a multi-turn follow-up into a standalone retrieval query.
+
+        If history is empty, returns user_query immediately with zero latency.
+        On any LLM error or timeout, gracefully falls back to user_query.
+        """
+        if not history:
+            return user_query
+
+        try:
+            messages = build_query_condensation_messages(
+                user_query=user_query,
+                history=history,
+            )
+            response = await self._llm.complete(
+                messages,
+                max_tokens=60,
+                temperature=0.0,
+            )
+            condensed = response.content.strip().strip('"').strip("'")
+            if condensed:
+                logger.debug("Condensed retrieval query: '%s' -> '%s'", user_query, condensed)
+                return condensed
+        except Exception as exc:
+            logger.warning("Query condensation failed, falling back to raw query: %r", exc)
+
+        return user_query
+
+
 
     async def create_conversation(
         self,
@@ -213,7 +252,7 @@ class ChatService:
                 logger.warning("Could not broadcast handoff event to Socket.IO: %r", exc)
             return assistant_message
 
-        # # 12b HITL - If human agent is already active or handoff is queued, AI agent remains silent!
+        # 12b HITL - If human agent is active or handoff is queued, AI agent remains silent!
         if conv.status in (ConversationStatus.HUMAN_ACTIVE, ConversationStatus.HANDOFF_REQUESTED):
             try:
                 from app.modules.chat.socketio_server import sio
@@ -242,12 +281,20 @@ class ChatService:
             ChatMessage(role=msg.role.value, content=msg.content) for msg in history_records[:-1]
         ]
 
-        # 3. Retrieve relevant chunks
-        try:
-            chunks = await self._retrieval.search(tenant_id=tenant_id, query=clean_text)
-        except Exception as exc:
-            logger.warning("Knowledge retrieval failed for chat: %r", exc)
-            chunks = []
+ 
+        # 3. Retrieve knowledge (bypassed for pure chit-chat / greetings)
+        chunks: Sequence[RetrievedChunk] = []
+        if not should_skip_retrieval(clean_text):
+            search_query = await self._condense_query(user_query=clean_text, history=history)
+            try:
+                chunks = await self._retrieval.search(tenant_id=tenant_id, query=search_query)
+            except Exception as exc:
+                logger.warning("Knowledge retrieval failed for chat stream: %r", exc)
+                chunks = []
+        else:
+            logger.debug("Skipping knowledge retrieval for chit-chat inquiry: '%s'", clean_text)
+
+
 
         # 4. Assemble prompt
         prompt_messages = build_chat_messages(
@@ -346,7 +393,7 @@ class ChatService:
                 yield token + " "
             return
 
-        # # 12b HITL - If human agent is already active or handoff is queued, AI agent remains silent!
+        # 12b HITL - If human agent is active or handoff is queued, AI agent remains silent!
         if conv.status in (ConversationStatus.HUMAN_ACTIVE, ConversationStatus.HANDOFF_REQUESTED):
             try:
                 from app.modules.chat.socketio_server import sio
@@ -375,12 +422,19 @@ class ChatService:
             ChatMessage(role=msg.role.value, content=msg.content) for msg in history_records[:-1]
         ]
 
-        # 3. Retrieve knowledge
-        try:
-            chunks = await self._retrieval.search(tenant_id=tenant_id, query=clean_text)
-        except Exception as exc:
-            logger.warning("Knowledge retrieval failed for chat stream: %r", exc)
-            chunks = []
+        # 3. Retrieve relevant chunks (bypassed for pure chit-chat / greetings)
+        chunks: Sequence[RetrievedChunk] = []
+        if not should_skip_retrieval(clean_text):
+            search_query = await self._condense_query(user_query=clean_text, history=history)
+            try:
+                chunks = await self._retrieval.search(tenant_id=tenant_id, query=search_query)
+            except Exception as exc:
+                logger.warning("Knowledge retrieval failed for chat: %r", exc)
+                chunks = []
+        else:
+            logger.debug("Skipping knowledge retrieval for chit-chat inquiry: '%s'", clean_text)
+
+
 
         # 4. Build prompt
         prompt_messages = build_chat_messages(
@@ -598,13 +652,16 @@ class ChatService:
         if len(dialogue) < 2:
             return ConversationSummaryResponse(
                 conversation_id=conversation_id,
-                summary="New inquiry with minimal interaction. Client has not specified detailed requirements yet.",
+                summary=(
+                    "New inquiry with minimal interaction. "
+                    "Client has not specified detailed requirements yet."
+                ),
                 key_intent="General Inquiry",
                 budget=None,
                 preferred_location=None,
             )
 
-        chat_history = [ChatMessage(role=m.role, content=m.content) for m in dialogue]
+        chat_history = [ChatMessage(role=m.role.value, content=m.content) for m in dialogue]
         prompt = build_summary_messages(chat_history)
 
         try:

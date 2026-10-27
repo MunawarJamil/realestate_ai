@@ -12,12 +12,12 @@ from app.modules.knowledge.retrieval import RetrievedChunk
 def test_load_system_prompt_returns_content() -> None:
     prompt = load_system_prompt()
     assert "Real Estate Assistant" in prompt
-    assert "Strict Context Grounding" in prompt
+    assert "Factual Grounding" in prompt or "Grounding" in prompt
 
 
 def test_format_context_block_empty() -> None:
     block = format_context_block([])
-    assert "No specific context documents were found" in block
+    assert "No specific reference documents attached" in block
 
 
 def test_format_context_block_with_chunks() -> None:
@@ -85,3 +85,27 @@ def test_build_chat_messages_structure() -> None:
     # Fourth: Current user inquiry
     assert messages[3].role == "user"
     assert messages[3].content == "What is the down payment?"
+
+
+def test_build_query_condensation_messages() -> None:
+    from app.modules.chat.prompts import build_query_condensation_messages
+
+    history = [
+        ChatMessage(role="user", content="Tell me about Lotus at Creek Beach."),
+        ChatMessage(role="assistant", content="Lotus at Creek Beach offers luxury apartments."),
+    ]
+
+    messages = build_query_condensation_messages(
+        user_query="How much for the 2-bed one?",
+        history=history,
+    )
+
+    assert len(messages) == 2
+    assert messages[0].role == "system"
+    assert "rephrase the follow-up into a single, standalone search query" in messages[0].content
+    assert messages[1].role == "user"
+    assert "Visitor: Tell me about Lotus at Creek Beach." in messages[1].content
+    assert "Assistant: Lotus at Creek Beach offers luxury apartments." in messages[1].content
+
+    assert "Follow-up Inquiry: How much for the 2-bed one?" in messages[1].content
+

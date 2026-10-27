@@ -121,14 +121,11 @@ LLM_FALLBACK_REPLY = (
     "Sorry, I'm having a little trouble right now. Please try again in a moment."
 )
 NO_CONTEXT_REPLY = (
-    "I couldn't find verified information about that. "
-    "Would you like me to connect you with one of our advisors?"
+    "I'm sorry, I couldn't quite understand your message. Could you please rephrase your question so I can help you?"
 )
 
 
-# ==============================================================================
 # Config (all tunables in one place, injectable for tests)
-# ==============================================================================
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,10 +161,6 @@ class SearchService(Protocol):
 class ConversationBusyError(RuntimeError):
     """Another turn is already running for this conversation."""
 
-
-# ==============================================================================
-# Helpers
-# ==============================================================================
 
 
 def _utcnow() -> datetime:
@@ -442,8 +435,6 @@ def make_rag_node(
         # 2. Hallucination guard: nothing verified -> don't let the LLM guess listings/prices
         if cfg.require_grounding and retrieval_service is not None and not chunks:
             return {
-                "context_chunks": [],
-                "retrieval_failed": False,
                 "reply_content": NO_CONTEXT_REPLY,
                 "messages": [AIMessage(content=NO_CONTEXT_REPLY)],
             }

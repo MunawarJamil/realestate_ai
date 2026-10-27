@@ -46,7 +46,9 @@ def scored(document_id: uuid.UUID, index: int, score: float) -> ScoredChunk:
 def store() -> ChunkVectorStore:
     mock: ChunkVectorStore = create_autospec(ChunkVectorStore, instance=True)
     mock.search.return_value = []  # type: ignore[attr-defined]
+    mock.hybrid_search.return_value = []  # type: ignore[attr-defined]
     return mock
+
 
 
 @pytest.fixture
@@ -92,8 +94,12 @@ async def test_search_embeds_trimmed_query_and_scopes_by_tenant(
     )
 
     assert embedder.queries == ["3 bed villa"]
-    store.search.assert_awaited_once_with(  # type: ignore[attr-defined]
-        tenant_id=TENANT_ID, vector=QUERY_VECTOR, limit=DEFAULT_LIMIT, score_threshold=THRESHOLD
+    store.hybrid_search.assert_awaited_once_with(  # type: ignore[attr-defined]
+        tenant_id=TENANT_ID,
+        vector=QUERY_VECTOR,
+        query_text="3 bed villa",
+        limit=DEFAULT_LIMIT,
+        score_threshold=THRESHOLD,
     )
 
 
@@ -104,7 +110,7 @@ async def test_explicit_limit_overrides_default(
         tenant_id=TENANT_ID, query="villa", limit=2
     )
 
-    assert store.search.await_args.kwargs["limit"] == 2  # type: ignore[attr-defined]
+    assert store.hybrid_search.await_args.kwargs["limit"] == 2  # type: ignore[attr-defined]
 
 
 async def test_no_matches_returns_empty_without_database_lookup(
@@ -122,7 +128,7 @@ async def test_results_keep_score_order_and_carry_document_titles(
     store: ChunkVectorStore, repository: KnowledgeDocumentRepository
 ) -> None:
     doc_a, doc_b = uuid.uuid4(), uuid.uuid4()
-    store.search.return_value = [scored(doc_b, 0, 0.9), scored(doc_a, 4, 0.7)]  # type: ignore[attr-defined]
+    store.hybrid_search.return_value = [scored(doc_b, 0, 0.9), scored(doc_a, 4, 0.7)]  # type: ignore[attr-defined]
     repository.get_ready_by_ids.return_value = {  # type: ignore[attr-defined]
         doc_a: SimpleNamespace(title="Brochure A"),
         doc_b: SimpleNamespace(title="Brochure B"),
@@ -145,7 +151,7 @@ async def test_chunks_of_documents_that_are_not_ready_are_dropped(
     store: ChunkVectorStore, repository: KnowledgeDocumentRepository
 ) -> None:
     ready_doc, processing_or_deleted_doc = uuid.uuid4(), uuid.uuid4()
-    store.search.return_value = [  # type: ignore[attr-defined]
+    store.hybrid_search.return_value = [  # type: ignore[attr-defined]
         scored(processing_or_deleted_doc, 0, 0.95),
         scored(ready_doc, 1, 0.80),
     ]
@@ -168,15 +174,15 @@ async def test_embedding_failure_becomes_retrieval_unavailable(
     with pytest.raises(RetrievalUnavailableError):
         await make_service(embedder, store, repository).search(tenant_id=TENANT_ID, query="villa")
 
-    store.search.assert_not_awaited()  # type: ignore[attr-defined]
+    store.hybrid_search.assert_not_awaited()  # type: ignore[attr-defined]
 
 
 async def test_vector_store_failure_becomes_retrieval_unavailable(
     store: ChunkVectorStore, repository: KnowledgeDocumentRepository
 ) -> None:
-    store.search.side_effect = ResponseHandlingException(Exception("qdrant down"))  # type: ignore[attr-defined]
+    store.hybrid_search.side_effect = ResponseHandlingException(Exception("qdrant down"))  # type: ignore[attr-defined]
 
     with pytest.raises(RetrievalUnavailableError):
         await make_service(FakeEmbedder(), store, repository).search(
             tenant_id=TENANT_ID, query="villa"
-        )
+        )

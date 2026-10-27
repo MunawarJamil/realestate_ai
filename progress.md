@@ -1,9 +1,9 @@
 # PROJECT PROGRESS TRACKER (progress.md)
 
-> **Last Updated**: 2026-10-25  
-> **Current Phase**: Phase 13 (CRM Qualified Leads Pipeline & Auto-Qualification Engine)  
-> **Status**: LangSmith Observability & HITL Socket.IO Complete ✅  
-> **Current File Context**: [`src/app/modules/leads/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/leads/) & [`src/app/modules/chat/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/chat/)
+> **Last Updated**: 2026-10-27  
+> **Current Phase**: Phase 12h (Production RAG Modernization & LangChain Alignment)  
+> **Status**: Flaw 1, 2, 3, 5 Complete ✅ | Flaw 4 (Post-Retrieval Re-Ranking) Stored for Later / Evals  
+> **Current File Context**: [`src/app/modules/knowledge/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/knowledge/) & [`src/app/modules/chat/`](file:///e:/PERSONAL-PROJECTS/realestate_ai/src/app/modules/chat/)
 
 ---
 
@@ -334,6 +334,17 @@
   - Bidirectional typing indicators across visitor widget, agency dashboard, and AI assistant.
   - Three-vertical-dots conversation deletion with database cascade and auto-healing on stale client sessions.
   - Optimistic message ID reconciliation preventing duplicate chat bubbles on agent replies.
+- [x] **Phase 12h: Production RAG Modernization & LangChain Alignment (COMPLETED ✅)**:
+  - [x] **Flaw 1: Conversational Amnesia in Query Retrieval**: Implemented `build_query_condensation_messages` and `_condense_query` across `send_message` and `stream_chat` to produce self-contained search queries from multi-turn chat history.
+  - [x] **Flaw 2: Naive Character Chunking & Broken PDF Tables**: Replaced manual character-merger with LangChain `RecursiveCharacterTextSplitter` and added `extraction_mode="layout"` to `pymupdf4llm` to preserve 2D markdown tables.
+  - [x] **Flaw 3: Dense-Only Search & LangChain BaseRetriever**: Added full-text tokenized schema in Qdrant (`TEXT_FIELD`), implemented hybrid search via Reciprocal Rank Fusion (RRF), and created `TenantAwareRetriever(BaseRetriever)` with multi-tenant filtering.
+  - [x] **Flaw 5: Unconditional RAG & Conversational Autonomy**:
+    - Created intent router with heuristic bypass for greetings/pleasantries.
+    - Updated system prompt (`real_estate_assistant.md`) for conversational autonomy and clarifying questions.
+    - Updated `NO_CONTEXT_REPLY` in `hitl_graph.py` to guide visitors to clarify questions rather than deflecting to human advisors prematurely.
+  - [ ] **Flaw 4: Post-Retrieval Cross-Encoder Re-Ranking [STORED FOR LATER]**:
+    - *Plan*: Implement two-stage retrieval (retrieve candidate pool $k=15-20$ from Qdrant hybrid search, then re-rank down to top 3–4 chunks using lightweight local cross-encoder like `flashrank` / `bge-reranker-small` to cut token bloat and hallucination).
+    - *Deferred To*: Phase 17 alongside automated offline RAG evaluations and RAGAS benchmarking.
 
 ---
 
