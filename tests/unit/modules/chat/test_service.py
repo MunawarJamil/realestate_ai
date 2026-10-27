@@ -203,3 +203,144 @@ async def test_stream_chat_llm_error_translates(
                 user_message="Hi",
             )
         ]
+
+
+async def test_send_message_multi_turn_condenses_query(
+    service: ChatService,
+    mock_repo: MagicMock,
+    mock_retrieval: MagicMock,
+    mock_llm: MagicMock,
+) -> None:
+    tenant_id = uuid.uuid4()
+    conv_id = uuid.uuid4()
+    mock_repo.get_conversation.return_value = Conversation(tenant_id=tenant_id, title="Test")
+
+    # Turn 1: Discussed Marina Heights
+    # Turn 2: Follow-up asking about 2-bedroom prices
+    turn1_user = Message(
+        tenant_id=tenant_id,
+        conversation_id=conv_id,
+        role=MessageRole.USER,
+        content="Tell me about Marina Heights.",
+    )
+    turn1_ai = Message(
+        tenant_id=tenant_id,
+        conversation_id=conv_id,
+        role=MessageRole.ASSISTANT,
+        content="Marina Heights is a waterfront residential tower.",
+    )
+    turn2_user = Message(
+        tenant_id=tenant_id,
+        conversation_id=conv_id,
+        role=MessageRole.USER,
+        content="How much is the 2-bed?",
+    )
+    # Repository returns all messages including turn 2
+    mock_repo.get_recent_messages.return_value = [turn1_user, turn1_ai, turn2_user]
+    mock_retrieval.search.return_value = []
+
+    # First LLM call: query condensation; Second LLM call: chat response
+    mock_llm.complete.side_effect = [
+        LLMResponse(
+            content="Marina Heights 2 bedroom apartment pricing",
+            model="test-model",
+            completion_tokens=8,
+        ),
+        LLMResponse(
+            content="2-bedroom units start at $450,000.",
+            model="test-model",
+            completion_tokens=10,
+        ),
+    ]
+
+    await service.send_message(
+        tenant_id=tenant_id,
+        conversation_id=conv_id,
+        user_message="How much is the 2-bed?",
+    )
+
+    # Retrieval must be called with the condensed query, not raw "How much is the 2-bed?"
+    mock_retrieval.search.assert_awaited_once_with(
+        tenant_id=tenant_id,
+        query="Marina Heights 2 bedroom apartment pricing",
+    )
+
+
+async def test_send_message_condensation_failure_falls_back_to_raw_query(
+    service: ChatService,
+    mock_repo: MagicMock,
+    mock_retrieval: MagicMock,
+    mock_llm: MagicMock,
+) -> None:
+    tenant_id = uuid.uuid4()
+    conv_id = uuid.uuid4()
+    mock_repo.get_conversation.return_value = Conversation(tenant_id=tenant_id, title="Test")
+
+    turn1_user = Message(
+        tenant_id=tenant_id,
+        conversation_id=conv_id,
+        role=MessageRole.USER,
+        content="Tell me about Marina Heights.",
+    )
+    turn2_user = Message(
+        tenant_id=tenant_id,
+        conversation_id=conv_id,
+        role=MessageRole.USER,
+        content="What is the down payment?",
+    )
+    mock_repo.get_recent_messages.return_value = [turn1_user, turn2_user]
+    mock_retrieval.search.return_value = []
+
+    # Condensation LLM call fails with an exception; answering LLM call succeeds
+    mock_llm.complete.side_effect = [
+        RuntimeError("Condensation model timeout"),
+        LLMResponse(content="Down payment is 10%.", model="test-model"),
+    ]
+
+    await service.send_message(
+        tenant_id=tenant_id,
+        conversation_id=conv_id,
+        user_message="What is the down payment?",
+    )
+
+    # Retrieval gracefully falls back to the original query without crashing
+    mock_retrieval.search.assert_awaited_once_with(
+        tenant_id=tenant_id,
+        query="What is the down payment?",
+    )
+
+
+async def test_send_message_greeting_skips_retrieval(
+    service: ChatService,
+    mock_repo: MagicMock,
+    mock_retrieval: MagicMock,
+    mock_llm: MagicMock,
+) -> None:
+    tenant_id = uuid.uuid4()
+    conv_id = uuid.uuid4()
+    mock_repo.get_conversation.return_value = Conversation(tenant_id=tenant_id, title="Test")
+
+    user_msg = Message(
+        tenant_id=tenant_id,
+        conversation_id=conv_id,
+        role=MessageRole.USER,
+        content="Hello!",
+    )
+    mock_repo.get_recent_messages.return_value = [user_msg]
+    mock_llm.complete.return_value = LLMResponse(
+        content="Hello! How can I assist you with luxury real estate today?",
+        model="test-model",
+    )
+
+    await service.send_message(
+        tenant_id=tenant_id,
+        conversation_id=conv_id,
+        user_message="Hello!",
+    )
+
+    # Retrieval must NOT be called for pure greetings
+    mock_retrieval.search.assert_not_awaited()
+    # LLM was called once to generate the greeting reply directly
+    mock_llm.complete.assert_awaited_once()
+
+

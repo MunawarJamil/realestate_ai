@@ -42,10 +42,15 @@ class PdfExtractor:
             reader = PdfReader(io.BytesIO(data))
             if reader.is_encrypted:
                 raise ExtractionError("Encrypted PDFs are not supported.")
-            return [
-                ExtractedPage(number=index, text=page.extract_text() or "")
-                for index, page in enumerate(reader.pages, start=1)
-            ]
+            pages: list[ExtractedPage] = []
+            for index, page in enumerate(reader.pages, start=1):
+                try:
+                    # Preserves 2D tabular layout (columns, tables, payment plans)
+                    text = page.extract_text(extraction_mode="layout") or ""
+                except TypeError:
+                    text = page.extract_text() or ""
+                pages.append(ExtractedPage(number=index, text=text))
+            return pages
         except ExtractionError:
             raise
         except (PyPdfError, ValueError, KeyError, TypeError, RecursionError) as exc:

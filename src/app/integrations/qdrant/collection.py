@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 
 TENANT_FIELD = "tenant_id"
 DOCUMENT_FIELD = "document_id"
+TEXT_FIELD = "text"
+
 
 
 async def ensure_collection(client: AsyncQdrantClient) -> None:
@@ -45,6 +47,20 @@ async def ensure_collection(client: AsyncQdrantClient) -> None:
         field_name=DOCUMENT_FIELD,
         field_schema=models.PayloadSchemaType.KEYWORD,
     )
+    # Full-text keyword index for exact alphanumeric match (unit codes, project names, prices)
+    await client.create_payload_index(
+        collection_name=name,
+        field_name=TEXT_FIELD,
+        field_schema=models.TextIndexParams(
+            type=models.TextIndexType.TEXT,
+            tokenizer=models.TokenizerType.WORD,
+            min_token_len=2,
+            max_token_len=30,
+            lowercase=True,
+        ),
+    )
+
+
     logger.info("Created Qdrant collection '%s' (dim=%s)", name, settings.embedding_dimension)
 
 

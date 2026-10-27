@@ -135,7 +135,7 @@ class KnowledgeDocumentRepository:
         )
         if status is not None:
             stmt = stmt.where(KnowledgeDocument.status == status)
-        return int((await self._session.execute(stmt)).scalar_one())
+        return (await self._session.execute(stmt)).scalar_one()
 
     async def delete(self, *, tenant_id: uuid.UUID, document_id: uuid.UUID) -> bool:
         stmt = delete(KnowledgeDocument).where(

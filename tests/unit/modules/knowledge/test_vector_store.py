@@ -187,7 +187,54 @@ async def test_search_skips_malformed_points(
     client.query_points.return_value = SimpleNamespace(  # type: ignore[attr-defined]
         points=[make_point(0.5, bad_payload), make_point(0.4, valid_payload(1))]
     )
-
     chunks = await store.search(tenant_id=TENANT_ID, vector=[0.1], limit=5)
-
     assert [chunk.chunk_index for chunk in chunks] == [1]
+
+
+
+
+def test_reciprocal_rank_fusion() -> None:
+    from app.modules.knowledge.vector_store import _reciprocal_rank_fusion
+
+    doc1, doc2, doc3 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    dense = [
+        ScoredChunk(document_id=doc1, chunk_index=0, page_number=1, text="dense top", score=0.9),
+        ScoredChunk(document_id=doc2, chunk_index=0, page_number=1, text="dense 2nd", score=0.8),
+    ]
+    keyword = [
+        ScoredChunk(document_id=doc3, chunk_index=0, page_number=1, text="kw top", score=1.0),
+        ScoredChunk(document_id=doc1, chunk_index=0, page_number=1, text="dense top", score=1.0),
+    ]
+
+    fused = _reciprocal_rank_fusion(dense, keyword)
+
+    # doc1 is in BOTH dense and keyword rankings, so it must be ranked #1
+    assert fused[0].document_id == doc1
+    assert len(fused) == 3
+
+
+async def test_hybrid_search_combines_dense_and_keyword(
+    store: ChunkVectorStore, client: AsyncQdrantClient
+) -> None:
+    # Mock dense query_points
+    client.query_points.return_value = SimpleNamespace(  # type: ignore[attr-defined]
+        points=[make_point(0.85, valid_payload(0, "dense match"))]
+    )
+    # Mock keyword scroll
+    keyword_record = SimpleNamespace(
+        id=str(uuid.uuid4()),
+        payload=valid_payload(1, "exact 402 keyword match"),
+    )
+    client.scroll.return_value = ([keyword_record], None)  # type: ignore[attr-defined]
+
+    results = await store.hybrid_search(
+        tenant_id=TENANT_ID,
+        vector=[0.1, 0.2],
+        query_text="Villa 402",
+        limit=5,
+    )
+
+    assert len(results) == 2
+    indices = {c.chunk_index for c in results}
+    assert indices == {0, 1}
+    client.scroll.assert_awaited_once()  # type: ignore[attr-defined]
