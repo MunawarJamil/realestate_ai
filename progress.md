@@ -8,6 +8,7 @@
 ---
 
 ## 📌 Quick Summary of Where We Left Off
+
 - **Phase 0-3 (Core, Tenants, Knowledge Ingestion & Retrieval)**: 100% complete and operational.
 - **Phase 4 / Step 7 (Conversational AI & Streaming RAG)**: 100% complete.
   - Multi-tenant chat models (`conversations`, `messages`) & Alembic migration applied.
@@ -112,17 +113,12 @@
     - Dashboard build passed (`npm run build` -> `485.9 kB`, 0 TS errors).
 - **Phase 12 (Real-Time Human Handoff & Hybrid WebSocket Gateway) Status**: 100% COMPLETE ✅!
 
-
-
-
-
-
-
 ---
 
 ## 🗺️ Roadmap & Phase Breakdown
 
 ### [x] Phase 0: Project Setup & Core Infrastructure
+
 - [x] UV package management setup (`pyproject.toml`) with Python 3.14
 - [x] Docker & Docker Compose setup (FastAPI, ARQ Worker, Postgres 16, Redis 7, Qdrant)
 - [x] Core Config (`src/app/core/config.py`) using `pydantic-settings`
@@ -136,6 +132,7 @@
 ---
 
 ### [x] Phase 1: Multi-Tenancy & Agency Management (`src/app/modules/tenants/`)
+
 - [x] `models.py`: `Tenant` model with slug and hashed API keys (`rk_live_...`)
 - [x] `schemas.py`: Pydantic V2 schemas (`TenantCreate`, `TenantCreated`, `TenantRead`)
 - [x] `repository.py`: Async queries for tenant lifecycle and authentication
@@ -147,6 +144,7 @@
 ---
 
 ### [x] Phase 2: Knowledge Base & Document Management (`src/app/modules/knowledge/`) (100% COMPLETE ✅)
+
 - [x] Consolidate `modules/documents` into `modules/knowledge`
 - [x] `enums.py`: `DocumentStatus` (pending, processing, ready, failed)
 - [x] `models.py`: `KnowledgeDocument` model with tenant isolation, checksum deduplication, and JSONB metadata
@@ -159,7 +157,8 @@
 
 ---
 
-### [ ] Phase 3: Background Worker & RAG Ingestion Pipeline (IN PROGRESS 🟡)
+### [ ] Phase 3: Background Worker & RAG Ingestion Pipeline (IN PROGRESS )
+
 - [x] `EmbeddingProvider` Protocol definition (`src/app/integrations/embeddings/base.py`)
 - [x] OpenRouter async `EmbeddingClient` with batching, bounded concurrency, and exponential backoff (`src/app/integrations/embeddings/client.py`)
 - [x] Embedding exceptions (`EmbeddingError`, `EmbeddingDimensionError`)
@@ -173,6 +172,7 @@
 ---
 
 ### [x] Phase 4: Conversational AI & Streaming RAG Engine (`src/app/modules/chat/`)
+
 - [x] `models.py`: `Conversation` and `Message` models (scoped by `tenant_id` with cascading delete and compound indexes)
 - [x] Database migration: `20261018_1720_4f9a1b2c3d4e_create_chat_tables.py` applied
 - [x] LLM client: OpenRouter adapter via `AsyncOpenAI` with env-configurable model (`src/app/integrations/llm/client.py`)
@@ -185,6 +185,7 @@
 ---
 
 ### [ ] Phase 5: Lead Capture & Qualification Pipeline (`src/app/modules/leads/`)
+
 - [ ] `models.py`: `Lead` model with qualification score, budget, intent, status
 - [ ] `schemas.py`, `repository.py`, `service.py`, `router.py`
 - [ ] Automated CRM scoring & status progression (New -> Qualified -> Contacted)
@@ -193,6 +194,7 @@
 ---
 
 ### [ ] Phase 6: Viewing Bookings & Scheduling (`src/app/modules/bookings/`)
+
 - [ ] `models.py`: `Booking` model linked to `Lead`, `Tenant`, and optional property
 - [ ] Availability slot engine
 - [ ] Calendar integration (`src/app/integrations/calendar/`)
@@ -201,6 +203,7 @@
 ---
 
 ### [ ] Phase 7: Dashboard API & Backend Live Integration (IN PROGRESS 🟡)
+
 - [x] **7.1 Backend Super Admin Tenants API**: `GET /api/v1/tenants`, `PATCH /api/v1/tenants/{id}`, repo queries, service methods.
 - [x] **7.2 Dynamic Auth Store & Production API Client**: Zustand `useAuthStore` with localStorage persistence, `apiClient` with typed `ApiError` & SSE stream reader.
 - [x] **7.3 Super Admin Portal Live Wiring (`/platform/*`)**: Real tenant fetching, instant provisioning modal with secret key display, status toggling, allowed origins whitelist.
@@ -211,6 +214,7 @@
 ---
 
 ### [x] Step 13 / Phase 8: Embeddable Web Chat Widget (`widget/`) (100% COMPLETE ✅)
+
 - [x] **13.1 Backend Public Widget Auth**:
   - `widget_key` (public key `wk_live_...`) and `allowed_domains` for tenants.
   - HTTP `Origin` header check for domain whitelisting.
@@ -247,6 +251,7 @@
 ---
 
 ### [x] Phase 9 / Step 14: Dual-Role Dashboard UI (`dashboard/`) (COMPLETED ✅)
+
 - [x] **Dual Entrypoint & Architecture Strategy**:
   - Alag entry points, same codebase:
     - `/login` & `/app/*` for Agency Admin.
@@ -264,6 +269,7 @@
 ---
 
 ### [x] Phase 8: Multi-Tenant Auth, RBAC & Gateway Separation (COMPLETED ✅)
+
 - [x] **8.1 Core Security & Password Infrastructure**:
   - Argon2id password hashing and constant-time verification (`hash_password`, `verify_password`) via `argon2-cffi`.
   - Audience-segregated JWT issuance & decoding (`create_user_tokens`, `decode_user_token`) with explicit audience claims (`aud="platform"` vs `aud="agency"`).
@@ -343,34 +349,39 @@
     - Updated system prompt (`real_estate_assistant.md`) for conversational autonomy and clarifying questions.
     - Updated `NO_CONTEXT_REPLY` in `hitl_graph.py` to guide visitors to clarify questions rather than deflecting to human advisors prematurely.
   - [ ] **Flaw 4: Post-Retrieval Cross-Encoder Re-Ranking [STORED FOR LATER]**:
-    - *Plan*: Implement two-stage retrieval (retrieve candidate pool $k=15-20$ from Qdrant hybrid search, then re-rank down to top 3–4 chunks using lightweight local cross-encoder like `flashrank` / `bge-reranker-small` to cut token bloat and hallucination).
-    - *Deferred To*: Phase 17 alongside automated offline RAG evaluations and RAGAS benchmarking.
+    - _Plan_: Implement two-stage retrieval (retrieve candidate pool $k=15-20$ from Qdrant hybrid search, then re-rank down to top 3–4 chunks using lightweight local cross-encoder like `flashrank` / `bge-reranker-small` to cut token bloat and hallucination).
+    - _Deferred To_: Phase 17 alongside automated offline RAG evaluations and RAGAS benchmarking.
 
 ---
 
 ## 🚀 Enterprise Scalability Roadmap (Phases 13 - 17)
 
-### [ ] Phase 13: CRM Qualified Leads Pipeline & Auto-Qualification Engine
-- [ ] **13.1 Database Architecture & Alembic Migration**:
-  - `Lead` SQLAlchemy model in `src/app/modules/leads/models.py` (`id`, `tenant_id`, `conversation_id`, `contact_name`, `email`, `phone`, `budget_min`, `budget_max`, `preferred_location`, `status`, `ai_score`, `score_breakdown`, `notes`, `created_at`).
-  - Indexing on `(tenant_id, status)` and `(tenant_id, ai_score)`.
-- [ ] **13.2 Pydantic Schemas, Repository & Service Layer**:
-  - `src/app/modules/leads/schemas.py`, `repository.py`, and `service.py`.
-  - CRUD operations with tenant scoping and status transitions (`new`, `contacted`, `qualified`, `lost`, `closed`).
-- [ ] **13.3 Autonomous LLM Structured Lead Extraction**:
-  - Background extraction worker inspecting conversation turns.
-  - Pydantic function calling extracting budget, timeline, location, and contact info.
-  - Heuristic + LLM lead scoring algorithm assigning 0-100 score (`Hot >= 85`, `Warm 70-84`, `Cold < 70`).
-- [ ] **13.4 Real-time Socket.IO Broadcasts & Alerts**:
-  - Emit `lead_created` and `lead_updated` events to agency room (`tenant_{id}_agents`).
-  - Browser notification trigger for brokers on newly captured Hot Leads.
-- [ ] **13.5 Agency Leads Dashboard Wiring**:
-  - Connect `AgencyLeadsPage.tsx` to `/api/v1/leads` endpoints.
-  - Filter by score, status, date, and export to CSV.
+### [x] Phase 13: CRM Qualified Leads Pipeline & Auto-Qualification Engine (COMPLETED ✅)
+
+- [x] **13.1 Database Architecture & Alembic Migration**:
+  - `Lead` SQLAlchemy model in `src/app/modules/leads/models.py` (`id`, `tenant_id`, `conversation_id`, `contact_name`, `email`, `phone`, `budget_min`, `budget_max`, `currency`, `property_type`, `preferred_location`, `status`, `ai_score`, `score_breakdown`, `notes`, `created_at`, `updated_at`).
+  - Indexing on `(tenant_id, status)`, `(tenant_id, ai_score)`, `(tenant_id, created_at)` and check constraint `ai_score >= 0 AND ai_score <= 100`.
+  - Executed Alembic autogenerate migration `20261028_0803_6299fcc0ba30_create_leads_table.py` inside Docker container.
+- [x] **13.2 Pydantic Schemas, Repository & Service Layer**:
+  - `src/app/modules/leads/enums.py`: `LeadStatus` (`new`, `contacted`, `qualified`, `lost`, `closed`), `LeadIntent` (`buy`, `rent`, `invest`, `sell`), `LeadScoreCategory` (`hot`, `warm`, `cold`).
+  - `src/app/modules/leads/schemas.py`: Pydantic V2 schemas with computed `score_category`, pagination, and filter models.
+  - `src/app/modules/leads/repository.py`: Pure async repository with tenant-isolation, eager session refresh for timestamp persistence, and multi-field ILIKE search.
+  - `src/app/modules/leads/service.py`: Domain service handling status transitions, deduplication, and upsert from conversations.
+- [x] **13.3 REST API Endpoints**:
+  - `src/app/modules/leads/router.py`: Mounted at `/api/v1/leads` with full CRUD, agent assignment, and on-demand AI extraction trigger `/extract/{conversation_id}`.
+- [x] **13.4 Autonomous LLM Structured Lead Extraction & Auto-Qualification**:
+  - Prompt and scoring matrix in `src/app/modules/leads/prompts.py` (Budget 30 pts, Timeline 25 pts, Intent 25 pts, Contact 20 pts).
+  - Extraction engine in `src/app/modules/leads/extractor.py` parsing structured JSON with heuristic regex fallback and score boundary enforcement.
+  - Non-blocking background worker `_async_extract_lead` running asynchronously after visitor chat turns.
+- [x] **13.5 Real-Time Socket.IO Broadcasts & Frontend Dashboard**:
+  - Real-time broadcasts `lead_created`, `lead_updated`, and `hot_lead_alert` to `tenant_{id}_agents`.
+  - Connected `dashboard/src/pages/agency/AgencyLeadsPage.tsx` with live Socket.IO client, KPI overview cards, status change, CSV export, and score breakdown modal.
+  - Automatic silent JWT refresh interceptor in `dashboard/src/api/client.ts` on 401 Unauthorized with singleton mutex and clean logout handling on token expiry.
 
 ---
 
 ### [ ] Phase 14: Autonomous Agentic Tool Calling (Transactional Actions)
+
 - [ ] **14.1 Property Viewing Booking Tool**:
   - Tool `schedule_viewing(property_id, visitor_name, phone, preferred_time)`.
   - Records appointments and alerts assigned agent.
@@ -386,18 +397,20 @@
 ---
 
 ### [ ] Phase 15: Production Hybrid RAG & Cross-Encoder Re-Ranking
-- [ ] **15.1 Hybrid Search Engine**:
+
+- [ ] **15.1 Hybrid Search Engine**: (already COMPLETED in Phase 12h ✅)
   - Combine Qdrant Dense Semantic Vectors with PostgreSQL Full-Text/BM25 Search.
   - Reciprocal Rank Fusion (RRF) to merge keyword and semantic matches.
 - [ ] **15.2 Local Cross-Encoder Re-ranking**:
-  - Integrate `flashrank` or lightweight Cross-Encoder (`bge-reranker`).
+  - Integrate `flashrank` or lightweight Cross-Encoder (`bge-reranker`).(Pending)
   - Re-score top 20 retrieved candidates to top 4 high-precision chunks, cutting LLM context cost and hallucinations.
-- [ ] **15.3 Dynamic Grounding Thresholds & RAG Guardrails**:
+- [ ] **15.3 Dynamic Grounding Thresholds & RAG Guardrails**:(already COMPLETED in Phase 12h ✅)
   - Score threshold enforcement with graceful "out of inventory" domain-specific fallbacks.
 
 ---
 
 ### [ ] Phase 16: Omnichannel WhatsApp Gateway (Webhook Integration)
+
 - [ ] **16.1 Meta WhatsApp Cloud API Webhook**:
   - Endpoint `POST /api/v1/webhooks/whatsapp` with challenge verification (`GET`).
   - Signature verification (`X-Hub-Signature-256`) for payload security.
@@ -411,6 +424,7 @@
 ---
 
 ### [ ] Phase 17: Production AI Evals, Resilience & Token Metering
+
 - [ ] **17.1 Automated Offline RAG Evaluation Suite**:
   - Continuous evaluation script using RAGAS / LLM-as-a-Judge.
   - Benchmark Groundedness (Faithfulness), Answer Relevance, and Context Precision across 25 golden questions.
@@ -418,6 +432,3 @@
   - Automatic fallback handler: OpenRouter $\rightarrow$ Groq / Google Gemini on 429/500/timeout.
 - [ ] **17.3 Per-Tenant Token Metering & Cost Tracking**:
   - Track prompt and completion tokens per agency tenant in Redis/Postgres for SaaS billing and quota enforcement.
-
-
-

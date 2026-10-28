@@ -10,6 +10,10 @@ export interface AgentSocketCallbacks {
   onConnected?: () => void;
   onDisconnected?: () => void;
   onError?: (err: Error) => void;
+  onLeadCreated?: (lead: any) => void;
+  onLeadUpdated?: (lead: any) => void;
+  onHotLeadAlert?: (lead: any) => void;
+
 }
 
 export class AgentSocketClient {
@@ -90,6 +94,26 @@ export class AgentSocketClient {
       console.warn('[Agency Socket.IO] Connection error:', err.message);
       this.callbacks.onError?.(err);
     });
+
+    // Lead events
+    this.socket.on('lead_created', (data: any) => {
+    this.callbacks.onLeadCreated?.(data);
+    });
+
+    this.socket.on('lead_updated', (data: any) => {
+    this.callbacks.onLeadUpdated?.(data);
+    });
+
+    this.socket.on('hot_lead_alert', (data: any) => {
+    this.callbacks.onHotLeadAlert?.(data);
+    });
+
+
+
+
+
+
+
   }
 
   public joinConversation(conversationId: string): void {

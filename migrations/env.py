@@ -1,4 +1,5 @@
 import asyncio
+from app.modules.leads.models import Lead
 
 from alembic import context
 from sqlalchemy import pool

@@ -123,6 +123,41 @@ export interface UserCreatePayload {
   role: 'agency_admin' | 'agent';
 }
 
+export interface BackendLead {
+  id: string;
+  tenant_id: string;
+  conversation_id: string | null;
+  assigned_agent_id: string | null;
+  contact_name: string | null;
+  email: string | null;
+  phone: string | null;
+  intent: 'buy' | 'rent' | 'invest' | 'sell';
+  property_type: string | null;
+  preferred_location: string | null;
+  timeline: string | null;
+  budget_min: number | null;
+  budget_max: number | null;
+  currency: string;
+  status: 'new' | 'contacted' | 'qualified' | 'lost' | 'closed';
+  ai_score: number;
+  score_category: 'hot' | 'warm' | 'cold';
+  score_breakdown: Record<string, any>;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackendLeadList {
+  items: BackendLead[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+
+
+
 const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
 type AuthType = 'admin' | 'agency' | 'bearer' | 'none';
@@ -130,6 +165,71 @@ type AuthType = 'admin' | 'agency' | 'bearer' | 'none';
 interface RequestOptions extends RequestInit {
   auth?: AuthType;
   params?: Record<string, string | number | boolean | undefined | null>;
+}
+
+let activeRefreshPromise: Promise<string | null> | null = null;
+
+async function refreshAuthToken(audience: 'agency' | 'platform'): Promise<string | null> {
+  if (activeRefreshPromise) {
+    return activeRefreshPromise;
+  }
+
+  activeRefreshPromise = (async () => {
+    try {
+      const authState = useAuthStore.getState();
+      const refreshToken =
+        audience === 'agency'
+          ? authState.agencyRefreshToken
+          : authState.platformRefreshToken;
+
+      if (!refreshToken) {
+        throw new Error('No refresh token available');
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/v1/auth/refresh?audience=${audience}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Refresh token invalid or expired');
+      }
+
+      const data: TokenResponse = await res.json();
+      if (audience === 'agency') {
+        useAuthStore.getState().updateAgencyTokens({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+        });
+      } else {
+        useAuthStore.getState().updatePlatformTokens({
+          access_token: data.access_token,
+          refresh_token: data.refresh_token,
+        });
+      }
+
+      return data.access_token;
+    } catch {
+      // Refresh token failed or expired -> log out and redirect cleanly
+      if (audience === 'agency') {
+        useAuthStore.getState().clearAgencyAuth();
+        if (window.location.pathname.startsWith('/app')) {
+          window.location.href = '/login';
+        }
+      } else {
+        useAuthStore.getState().clearPlatformAuth();
+        if (window.location.pathname.startsWith('/platform')) {
+          window.location.href = '/platform/login';
+        }
+      }
+      return null;
+    } finally {
+      activeRefreshPromise = null;
+    }
+  })();
+
+  return activeRefreshPromise;
 }
 
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
@@ -179,10 +279,30 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     }
   }
 
-  const response = await fetch(url, {
+  let response = await fetch(url, {
     ...customConfig,
     headers: reqHeaders,
   });
+
+  // Handle 401 Unauthorized -> Attempt automatic silent token refresh
+  if (
+    response.status === 401 &&
+    auth !== 'none' &&
+    !endpoint.includes('/auth/login') &&
+    !endpoint.includes('/auth/refresh')
+  ) {
+    const audience = auth === 'admin' ? 'platform' : 'agency';
+    const newToken = await refreshAuthToken(audience);
+
+    if (newToken) {
+      // Retry original request with fresh access token
+      reqHeaders['Authorization'] = `Bearer ${newToken}`;
+      response = await fetch(url, {
+        ...customConfig,
+        headers: reqHeaders,
+      });
+    }
+  }
 
   if (!response.ok) {
     let errorDetail = `Request failed with status ${response.status}`;
@@ -547,4 +667,64 @@ export const apiClient = {
         body: JSON.stringify(payload),
       }),
   },
+
+
+// --- Leads / Conversation Endpoints
+  leads: {
+    list: (params?: {
+      status?: string;
+      intent?: string;
+      score_category?: string;
+      search?: string;
+      page?: number;
+      size?: number;
+      sort_by?: string;
+      sort_desc?: boolean;
+    }) =>
+      request<BackendLeadList>('/api/v1/leads', {
+        method: 'GET',
+        auth: 'agency',
+        params,
+      }),
+
+    get: (id: string) =>
+      request<BackendLead>(`/api/v1/leads/${id}`, {
+        method: 'GET',
+        auth: 'agency',
+      }),
+
+    create: (payload: Partial<BackendLead>) =>
+      request<BackendLead>('/api/v1/leads', {
+        method: 'POST',
+        auth: 'agency',
+        body: JSON.stringify(payload),
+      }),
+
+    update: (id: string, payload: Partial<BackendLead>) =>
+      request<BackendLead>(`/api/v1/leads/${id}`, {
+        method: 'PATCH',
+        auth: 'agency',
+        body: JSON.stringify(payload),
+      }),
+
+    delete: (id: string) =>
+      request<void>(`/api/v1/leads/${id}`, {
+        method: 'DELETE',
+        auth: 'agency',
+      }),
+
+    assign: (id: string, assigned_agent_id: string | null) =>
+      request<BackendLead>(`/api/v1/leads/${id}/assign`, {
+        method: 'POST',
+        auth: 'agency',
+        body: JSON.stringify({ assigned_agent_id }),
+      }),
+
+    extract: (conversationId: string) =>
+      request<BackendLead | null>(`/api/v1/leads/extract/${conversationId}`, {
+        method: 'POST',
+        auth: 'agency',
+      }),
+  },
 };
+

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import socketio
 import structlog
 from fastapi import FastAPI
-
+from app.modules.leads.router import router as leads_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.db.session import dispose_engine
@@ -83,6 +83,6 @@ fastapi_app.include_router(tenants_router, prefix="/api/v1")
 fastapi_app.include_router(me_router, prefix="/api/v1")
 fastapi_app.include_router(knowledge_router, prefix="/api/v1")
 fastapi_app.include_router(chat_router, prefix="/api/v1")
+fastapi_app.include_router(leads_router, prefix="/api/v1")
 fastapi_app.include_router(widget_router, prefix="/api/v1")
-# 12c HITL - Mount Socket.IO as ASGI wrapper so uvicorn app.main:app serves both
 app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app, socketio_path="socket.io")

@@ -40,6 +40,8 @@ export interface AuthState {
 
   setAgencyAuth: (tokens: AuthTokens, user: UserInfo, tenant?: TenantRead | null) => void;
   clearAgencyAuth: () => void;
+  updateAgencyTokens: (tokens: { access_token: string; refresh_token: string }) => void;
+  updatePlatformTokens: (tokens: { access_token: string; refresh_token: string }) => void;
 
   setAdminKey: (key: string) => void;
   clearAdminKey: () => void;
@@ -97,6 +99,18 @@ export const useAuthStore = create<AuthState>()(
           agencyUser: null,
           apiKey: null,
           tenant: null,
+        }),
+
+      updateAgencyTokens: (tokens: { access_token: string; refresh_token: string }) =>
+        set({
+          agencyToken: tokens.access_token,
+          agencyRefreshToken: tokens.refresh_token,
+        }),
+
+      updatePlatformTokens: (tokens: { access_token: string; refresh_token: string }) =>
+        set({
+          platformToken: tokens.access_token,
+          platformRefreshToken: tokens.refresh_token,
         }),
 
       setAdminKey: (key: string) => set({ adminKey: key.trim() }),
