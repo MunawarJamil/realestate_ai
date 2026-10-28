@@ -1,13 +1,13 @@
 # 12c & 12d HITL - Socket.IO Real-Time Gateway (transport only, LangGraph lives in graph_runtime)
 from __future__ import annotations
-
+from app.core.config import Settings
 import inspect
 import logging
 from typing import Any
 from urllib.parse import parse_qs
 import uuid
 from datetime import UTC, datetime
-
+import asyncio
 import socketio
 from socketio.exceptions import ConnectionRefusedError
 
@@ -338,6 +338,11 @@ async def _handle_visitor_message(
     if ai_payload:
         await sio.emit("new_message", ai_payload, room=conv_room)
 
+    # Spawn non-blocking lead qualification analysis
+    asyncio.create_task(
+        _async_extract_lead(tenant_id=tenant_id, conversation_id=conversation_id)
+    )
+
     return {"status": "ok", "message_id": str(msg_id)}
 
 
@@ -420,3 +425,45 @@ async def typing(sid: str, data: dict[str, Any]) -> None:
         room=conv_room,
         skip_sid=sid,
     )
+
+
+
+
+async def _async_extract_lead(*, tenant_id: uuid.UUID, conversation_id: uuid.UUID) -> None:
+    """Non-blocking background extraction worker running after conversation turn."""
+    try:
+        from app.core.config import get_settings
+        from app.db.session import get_sessionmaker
+        from app.integrations.llm.client import build_llm_client
+        from app.modules.leads.extractor import LeadExtractionEngine
+        from app.modules.leads.repository import LeadRepository
+        from app.modules.leads.service import LeadService
+
+        async with get_sessionmaker()() as db:
+            repo = ChatRepository(db)
+            messages = await repo.list_messages(
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                limit=50,
+                offset=0,
+            )
+            if not messages:
+                return
+
+            lead_service = LeadService(LeadRepository(db))
+            engine = LeadExtractionEngine(
+                llm=build_llm_client(get_settings()),
+                lead_service=lead_service,
+            )
+            await engine.extract_and_qualify(
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                messages=list(messages),
+            )
+            await db.commit()
+    except Exception as exc:
+        logger.warning(
+            "Background lead extraction error for conversation_id=%s: %r",
+            conversation_id,
+            exc,
+        )
