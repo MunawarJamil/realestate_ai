@@ -22,7 +22,9 @@ from app.modules.tenants.router import me_router
 from app.modules.tenants.router import router as tenants_router
 from app.modules.widget.router import router as widget_router
 from app.workers.queue import close_queue, init_queue
-
+from app.modules.bookings.router import router as bookings_router
+from app.modules.calculator.router import router as calculator_router
+from app.modules.properties.router import router as properties_router
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     log = structlog.get_logger()
@@ -85,4 +87,10 @@ fastapi_app.include_router(knowledge_router, prefix="/api/v1")
 fastapi_app.include_router(chat_router, prefix="/api/v1")
 fastapi_app.include_router(leads_router, prefix="/api/v1")
 fastapi_app.include_router(widget_router, prefix="/api/v1")
+fastapi_app.include_router(bookings_router, prefix="/api/v1")
+fastapi_app.include_router(calculator_router, prefix="/api/v1")
+fastapi_app.include_router(properties_router, prefix="/api/v1")
+
+
+
 app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app, socketio_path="socket.io")

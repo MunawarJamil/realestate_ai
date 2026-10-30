@@ -30,6 +30,7 @@ IntentType = Literal[
     "greeting",
     "smalltalk",
     "property_inquiry",
+    "tool_action",
     "handoff_requested",
     "live_human_support",
 ]
@@ -86,6 +87,9 @@ class AgentState(TypedDict):
 
     # 7. Free-form metadata (merged, not overwritten)
     metadata: Annotated[NotRequired[dict[str, Any]], merge_dicts]
+    # 8. Agentic Tool Calling  
+    tool_calls: NotRequired[list[dict[str, Any]]]
+    tool_results: NotRequired[list[dict[str, Any]]]
  
  
  # Factories 
@@ -133,6 +137,8 @@ def make_turn_input(
         "retrieval_failed": False,
         "context_chunks": [],
         "reply_content": None,
+        "tool_calls": [],
+        "tool_results": [],
     }
 
 

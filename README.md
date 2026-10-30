@@ -17,16 +17,16 @@ A modern, production-grade, multi-tenant AI assistant and lead qualification pla
 
 ## 🛠️ Tech Stack
 
-| Layer | Technology |
-|---|---|
-| **Runtime & Package Manager** | Python 3.14+, [uv](https://github.com/astral-sh/uv) |
-| **API Framework** | [FastAPI](https://fastapi.tiangolo.com/) (Fully Async) + Uvicorn |
-| **Database & ORM** | PostgreSQL 16, [SQLAlchemy 2.0](https://www.sqlalchemy.org/) (Async), `asyncpg`, Alembic |
-| **Vector Database** | [Qdrant](https://qdrant.tech/) (Multi-tenant HNSW payload indexing) |
-| **Background Tasks** | [ARQ](https://github.com/samuelcolvin/arq) + Redis 7 |
-| **AI & Embeddings** | Anthropic Claude, OpenAI, Voyage AI, `sse-starlette` |
-| **Logging & Telemetry** | [Structlog](https://www.structlog.org/) (Structured JSON in Prod) |
-| **Security** | Argon2-cffi, SHA-256 hashed API keys (`rk_live_...`), PyJWT |
+| Layer                         | Technology                                                                               |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| **Runtime & Package Manager** | Python 3.14+, [uv](https://github.com/astral-sh/uv)                                      |
+| **API Framework**             | [FastAPI](https://fastapi.tiangolo.com/) (Fully Async) + Uvicorn                         |
+| **Database & ORM**            | PostgreSQL 16, [SQLAlchemy 2.0](https://www.sqlalchemy.org/) (Async), `asyncpg`, Alembic |
+| **Vector Database**           | [Qdrant](https://qdrant.tech/) (Multi-tenant HNSW payload indexing)                      |
+| **Background Tasks**          | [ARQ](https://github.com/samuelcolvin/arq) + Redis 7                                     |
+| **AI & Embeddings**           | Anthropic Claude, OpenAI, Voyage AI, `sse-starlette`                                     |
+| **Logging & Telemetry**       | [Structlog](https://www.structlog.org/) (Structured JSON in Prod)                        |
+| **Security**                  | Argon2-cffi, SHA-256 hashed API keys (`rk_live_...`), PyJWT                              |
 
 ---
 
@@ -43,7 +43,7 @@ src/app/
 ├── workers/             # ARQ background worker tasks and settings
 └── modules/             # High-cohesion domain modules
     ├── tenants/         # Agency tenant management & API keys
-    ├── documents/       # File upload, storage, and status tracking
+    ├── knowledge/       # File upload, storage, and status tracking
     ├── chat/            # Streaming conversations & RAG pipeline
     ├── leads/           # Lead qualification & CRM integration
     ├── bookings/        # Viewing appointments & calendar slots
@@ -51,6 +51,7 @@ src/app/
 ```
 
 Each module follows a strict layered pattern:
+
 - `models.py`: SQLAlchemy 2.0 async models (`UUIDPrimaryKeyMixin`, `TimestampMixin`).
 - `schemas.py`: Pydantic V2 request/response models.
 - `repository.py`: Async database queries strictly scoped by `tenant_id`.
@@ -64,11 +65,13 @@ Each module follows a strict layered pattern:
 ## 🚀 Getting Started
 
 ### Prerequisites
+
 - [Docker](https://www.docker.com/) & Docker Compose
 - [uv](https://docs.astral.sh/uv/) (Fast Python package manager)
 - Python 3.14+
 
 ### 1. Clone & Environment Setup
+
 ```bash
 git clone https://github.com/MunawarJamil/realestate_ai.git
 cd realestate_ai
@@ -80,7 +83,9 @@ cp .env.example .env
 Edit `.env` to configure your API keys and credentials.
 
 ### 2. Local Development with Docker
+
 Start PostgreSQL, Redis, Qdrant, API, and Background Worker:
+
 ```bash
 docker compose -f docker/docker-compose.yml up --build
 ```
@@ -90,6 +95,7 @@ docker compose -f docker/docker-compose.yml up --build
 - **Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
 
 ### 3. Running Locally with UV (without Docker for API)
+
 ```bash
 # Install dependencies
 uv sync
@@ -136,4 +142,5 @@ uv run ruff format src tests
 ---
 
 ## 📄 License
+
 Proprietary. All rights reserved.

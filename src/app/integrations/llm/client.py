@@ -1,6 +1,6 @@
-import logging
+﻿import logging
 from collections.abc import AsyncIterator, Sequence
-from typing import cast
+from typing import Any, cast
 from langsmith.wrappers import wrap_openai
 
 import openai
@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.core.config import Settings
-from app.integrations.llm.base import ChatMessage, LLMResponse
+from app.integrations.llm.base import ChatMessage, LLMResponse, ToolCallData
 from app.integrations.llm.exceptions import (
     LLMBadResponseError,
     LLMError,
@@ -64,29 +64,51 @@ class OpenRouterLLMClient:
         *,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        tools: Sequence[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         try:
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=_to_params(messages),
-                max_tokens=max_tokens or self._default_max_tokens,
-                temperature=self._default_temperature if temperature is None else temperature,
-            )
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": _to_params(messages),
+                "max_tokens": max_tokens or self._default_max_tokens,
+                "temperature": self._default_temperature if temperature is None else temperature,
+            }
+            if tools:
+                kwargs["tools"] = list(tools)
+
+            response = await self._client.chat.completions.create(**kwargs)
         except openai.OpenAIError as exc:
             raise _translate(exc) from exc
 
-        # Free models occasionally return empty choices / null content.
-        if not response.choices or not response.choices[0].message.content:
+        if not response.choices:
+            raise LLMBadResponseError("LLM returned an empty completion")
+
+        choice = response.choices[0]
+        msg = choice.message
+        parsed_tools: list[ToolCallData] = []
+        if getattr(msg, "tool_calls", None):
+            for tc in msg.tool_calls:
+                func = tc.function
+                parsed_tools.append(
+                    ToolCallData(
+                        name=func.name,
+                        arguments=func.arguments,
+                        id=tc.id,
+                    )
+                )
+
+        content = msg.content or ""
+        if not content and not parsed_tools:
             raise LLMBadResponseError("LLM returned an empty completion")
 
         usage = response.usage
         return LLMResponse(
-            content=response.choices[0].message.content,
+            content=content,
             model=response.model or self._model,
             prompt_tokens=usage.prompt_tokens if usage else None,
             completion_tokens=usage.completion_tokens if usage else None,
+            tool_calls=parsed_tools if parsed_tools else None,
         )
-
     async def stream(
         self,
         messages: Sequence[ChatMessage],

@@ -1,4 +1,4 @@
-import {
+﻿import {
   createRouter,
   createRoute,
   createRootRoute,
@@ -21,6 +21,8 @@ import { AgencyDashboardPage } from './pages/agency/AgencyDashboardPage';
 import { AgencyConversationsPage } from './pages/agency/AgencyConversationsPage';
 import { AgencyLeadsPage } from './pages/agency/AgencyLeadsPage';
 import { AgencyKnowledgePage } from './pages/agency/AgencyKnowledgePage';
+import { AgencyBookingsPage } from './pages/agency/AgencyBookingsPage';
+import { AgencyPropertiesPage } from './pages/agency/AgencyPropertiesPage';
 import { AgencySettingsPage } from './pages/agency/AgencySettingsPage';
 
 
@@ -117,6 +119,18 @@ const agencyKnowledgeRoute = createRoute({
 });
 
 
+const agencyBookingsRoute = createRoute({
+  getParentRoute: () => agencyLayoutRoute,
+  path: '/bookings',
+  component: AgencyBookingsPage,
+});
+
+const agencyPropertiesRoute = createRoute({
+  getParentRoute: () => agencyLayoutRoute,
+  path: '/properties',
+  component: AgencyPropertiesPage,
+});
+
 const agencySettingsRoute = createRoute({
   getParentRoute: () => agencyLayoutRoute,
   path: '/settings',
@@ -139,6 +153,8 @@ const routeTree = rootRoute.addChildren([
     agencyDashboardRoute,
     agencyConversationsRoute,
     agencyLeadsRoute,
+    agencyBookingsRoute,
+    agencyPropertiesRoute,
     agencyKnowledgeRoute,
     agencySettingsRoute,
   ]),
