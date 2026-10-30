@@ -5,7 +5,7 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-
+from app.modules.bookings.models import ViewingBooking  # noqa: F401 – registers table with Base.metadata
 from app.core.config import get_settings
 from app.db.base import Base
 from app.modules.tenants.models import Tenant  # Import Tenant model for autogenerate migrations 
@@ -13,6 +13,7 @@ from app.modules.knowledge.models import KnowledgeDocument
 from app.modules.chat.models import Conversation, Message
 from app.modules.auth.models import User
 config = context.config
+from app.modules.properties.models import Property  # noqa: F401
 # Escaping % in database url because it is used in postgres connection string
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 target_metadata = Base.metadata

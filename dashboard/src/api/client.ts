@@ -1,4 +1,4 @@
-import { useAuthStore } from '../store/useAuthStore';
+﻿import { useAuthStore } from '../store/useAuthStore';
 import type {
   TenantRead,
   TenantCreated,
@@ -149,6 +149,61 @@ export interface BackendLead {
 
 export interface BackendLeadList {
   items: BackendLead[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+export interface BackendBooking {
+  id: string;
+  tenant_id: string;
+  conversation_id: string | null;
+  assigned_agent_id: string | null;
+  visitor_name: string;
+  phone: string;
+  email: string | null;
+  property_ref: string | null;
+  preferred_time: string;
+  status: 'pending' | 'confirmed' | 'canceled';
+  source: 'ai_agent' | 'dashboard' | 'api';
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackendBookingList {
+  items: BackendBooking[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+export interface BackendProperty {
+  id: string;
+  tenant_id: string;
+  title: string;
+  description: string | null;
+  property_type: 'apartment' | 'villa' | 'townhouse' | 'penthouse' | 'commercial' | 'land';
+  listing_type: 'sale' | 'rent';
+  status: 'available' | 'under_offer' | 'sold' | 'rented';
+  price: number | string;
+  currency: string;
+  location: string;
+  address: string | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  area_sqft: number | string | null;
+  amenities: string[];
+  images: string[];
+  is_featured: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackendPropertyList {
+  items: BackendProperty[];
   total: number;
   page: number;
   size: number;
@@ -726,5 +781,101 @@ export const apiClient = {
         auth: 'agency',
       }),
   },
-};
 
+  bookings: {
+    list: (params?: {
+      status?: string;
+      assigned_agent_id?: string;
+      search?: string;
+      page?: number;
+      size?: number;
+      sort_by?: string;
+      sort_desc?: boolean;
+    }) =>
+      request<BackendBookingList>('/api/v1/bookings', {
+        method: 'GET',
+        auth: 'agency',
+        params,
+      }),
+
+    get: (id: string) =>
+      request<BackendBooking>(`/api/v1/bookings/${id}`, {
+        method: 'GET',
+        auth: 'agency',
+      }),
+
+    create: (payload: Partial<BackendBooking>) =>
+      request<BackendBooking>('/api/v1/bookings', {
+        method: 'POST',
+        auth: 'agency',
+        body: JSON.stringify(payload),
+      }),
+
+    update: (id: string, payload: Partial<BackendBooking>) =>
+      request<BackendBooking>(`/api/v1/bookings/${id}`, {
+        method: 'PATCH',
+        auth: 'agency',
+        body: JSON.stringify(payload),
+      }),
+
+    cancel: (id: string, reason?: string) =>
+      request<BackendBooking>(`/api/v1/bookings/${id}/cancel`, {
+        method: 'POST',
+        auth: 'agency',
+        body: JSON.stringify({ reason }),
+      }),
+
+    delete: (id: string) =>
+      request<void>(`/api/v1/bookings/${id}`, {
+        method: 'DELETE',
+        auth: 'agency',
+      }),
+  },
+
+  properties: {
+    list: (params?: {
+      status?: string;
+      property_type?: string;
+      listing_type?: string;
+      min_price?: number;
+      max_price?: number;
+      bedrooms?: number;
+      search?: string;
+      page?: number;
+      size?: number;
+      sort_by?: string;
+      sort_desc?: boolean;
+    }) =>
+      request<BackendPropertyList>('/api/v1/properties', {
+        method: 'GET',
+        auth: 'agency',
+        params,
+      }),
+
+    get: (id: string) =>
+      request<BackendProperty>(`/api/v1/properties/${id}`, {
+        method: 'GET',
+        auth: 'agency',
+      }),
+
+    create: (payload: Partial<BackendProperty>) =>
+      request<BackendProperty>('/api/v1/properties', {
+        method: 'POST',
+        auth: 'agency',
+        body: JSON.stringify(payload),
+      }),
+
+    update: (id: string, payload: Partial<BackendProperty>) =>
+      request<BackendProperty>(`/api/v1/properties/${id}`, {
+        method: 'PATCH',
+        auth: 'agency',
+        body: JSON.stringify(payload),
+      }),
+
+    delete: (id: string) =>
+      request<void>(`/api/v1/properties/${id}`, {
+        method: 'DELETE',
+        auth: 'agency',
+      }),
+  },
+};

@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useRouterState, useNavigate } from '@tanstack/react-router';
 import {
   LayoutDashboard,
+  Calendar,
+  Building2,
   MessageSquare,
   FileText,
   Users,
@@ -36,6 +38,8 @@ export const AgencyLayout: React.FC = () => {
     { label: 'Overview', path: '/app', icon: LayoutDashboard },
     { label: 'Conversations', path: '/app/conversations', icon: MessageSquare },
     { label: 'Leads & CRM', path: '/app/leads', icon: Users },
+    { label: 'Appointments', path: '/app/bookings', icon: Calendar },
+    { label: 'Inventory', path: '/app/properties', icon: Building2 },
     { label: 'Knowledge Base', path: '/app/knowledge', icon: FileText },
     { label: 'Widget & Settings', path: '/app/settings', icon: Settings },
   ];
@@ -44,6 +48,8 @@ export const AgencyLayout: React.FC = () => {
     if (path === '/app') return 'Agency Workspace';
     if (path.startsWith('/app/conversations')) return 'Live Visitor Conversations';
     if (path.startsWith('/app/leads')) return 'CRM Qualified Leads';
+    if (path.startsWith('/app/bookings')) return 'Viewing Appointments';
+    if (path.startsWith('/app/properties')) return 'Property Inventory Catalog';
     if (path.startsWith('/app/knowledge')) return 'Knowledge Base & Brochures';
     if (path.startsWith('/app/settings')) return 'Widget & Workspace Settings';
     return 'Agency Portal';

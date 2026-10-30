@@ -1,11 +1,12 @@
-# 12d HITL - Production-Grade LangGraph Orchestrator for RealEstate AI
+﻿# 12d HITL - Production-Grade LangGraph Orchestrator for RealEstate AI
 from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+import json
 import logging
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 import uuid
@@ -33,6 +34,20 @@ if TYPE_CHECKING:
 
 import re
 
+
+
+
+_CALCULATOR_SIGNALS = [
+    re.compile(r"\b(mortgage|emi|monthly payment|loan|interest rate|down payment|financing)\b", re.IGNORECASE),
+]
+
+_BOOKING_SIGNALS = [
+    re.compile(r"\b(book a viewing|schedule a visit|schedule viewing|site visit|book visit|arrange viewing)\b", re.IGNORECASE),
+]
+
+_CATALOG_FILTER_SIGNALS = [
+    re.compile(r"\b(properties under|apartments under|villas under|budget of|listings in|options in)\b", re.IGNORECASE),
+]
 # High-frequency multilingual greetings, small-talk, acknowledgments & bot identity inquiries
 _SMALLTALK_EXACT = {
     # English greetings & pleasantries
@@ -74,7 +89,7 @@ _REAL_ESTATE_SIGNALS = [
 ]
 
 
-def classify_visitor_intent(text: str) -> Literal["smalltalk", "property_inquiry"]:
+def classify_visitor_intent(text: str) -> Literal["smalltalk", "tool_action", "property_inquiry"]:
     """
     Production-grade, zero-latency intent classifier.
     
@@ -88,6 +103,14 @@ def classify_visitor_intent(text: str) -> Literal["smalltalk", "property_inquiry
     if not single_spaced:
         return "smalltalk"
 
+
+
+    # Action / tool calls detection
+    for pattern in _BOOKING_SIGNALS + _CALCULATOR_SIGNALS + _CATALOG_FILTER_SIGNALS:
+        if pattern.search(single_spaced):
+            return "tool_action"
+
+            
     # 1. Check for explicit property signals first
     for pattern in _REAL_ESTATE_SIGNALS:
         if pattern.search(single_spaced):
@@ -109,8 +132,6 @@ def classify_visitor_intent(text: str) -> Literal["smalltalk", "property_inquiry
 
     # 5. Default fallback: keep normal RAG flow
     return "property_inquiry"
-
-# 12e improvements ended
 
 
 logger = logging.getLogger(__name__)
@@ -375,9 +396,73 @@ async def human_review_node(state: AgentState) -> dict[str, Any]:
     }
 
 
-# ==============================================================================
+def make_tool_agent_node(llm: LLMProvider, cfg: HitlConfig = DEFAULT_CONFIG):
+    async def tool_agent_node(state: AgentState) -> dict[str, Any]:
+        from app.modules.chat.tools import TOOLS_DEFINITIONS, dispatch_tool_call
+
+        ctx = _log_ctx(state)
+        messages = state.get("messages", [])
+        idx = _last_human_index(messages)
+        query = str(messages[idx].content) if idx is not None else ""
+        tenant_id = uuid.UUID(state["tenant_id"])
+        conversation_id = uuid.UUID(state["conversation_id"])
+
+        system_prompt = (
+            "You are an expert AI real estate coordinator. You have access to tools for booking viewings, "
+            "calculating mortgages, and querying current inventory. Inspect the user request and call the appropriate tool. "
+            "If necessary parameters are missing (e.g. phone or name for booking, or loan details), ask the user clearly."
+        )
+
+        prompt_messages = [
+            ChatMessage(role="system", content=system_prompt),
+            *(_to_llm_history(messages, idx, limit=6) if idx is not None else []),
+            ChatMessage(role="user", content=query),
+        ]
+
+        try:
+            # Let the LLM decide which tool to call with arguments
+            resp = await _call_with_retry(
+                lambda: llm.complete(prompt_messages, tools=TOOLS_DEFINITIONS),
+                timeout=cfg.llm_timeout,
+                retries=1,
+            )
+
+            # Check if LLM requested a tool execution
+            if hasattr(resp, "tool_calls") and resp.tool_calls:
+                t_call = resp.tool_calls[0]
+                args = t_call.arguments if isinstance(t_call.arguments, dict) else json.loads(t_call.arguments)
+                tool_output = await dispatch_tool_call(
+                    tool_name=t_call.name,
+                    arguments=args,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                )
+                reply = tool_output["display_message"]
+                return {
+                    "tool_calls": [{"name": t_call.name, "arguments": t_call.arguments, "id": t_call.id}],
+                    "tool_results": [tool_output],
+                    "reply_content": reply,
+                    "messages": [AIMessage(content=reply)],
+                    "ai_failure_count": 0,
+                }
+
+            # If no tool was chosen, provide regular assistant reply
+            reply = (resp.content or "").strip()
+            if not reply:
+                reply = "How can I assist you with scheduling a viewing or calculating mortgage payments?"
+            return {
+                "reply_content": reply,
+                "messages": [AIMessage(content=reply)],
+                "ai_failure_count": 0,
+            }
+
+        except Exception as exc:
+            logger.exception("Tool agent execution failed: %r", exc, extra=ctx)
+            return _failure_result(state, cfg, retrieval_failed=False)
+
+    return tool_agent_node
 # Node 3: Grounded RAG + LLM generation
-# ==============================================================================
+
 
 
 def _failure_result(
@@ -472,11 +557,13 @@ def make_rag_node(
 
 # Conditional edge
 
-def route_next_step(state: AgentState) -> Literal["human_review", "smalltalk_agent", "rag_agent"]:
+def route_next_step(state: AgentState) -> Literal["human_review", "smalltalk_agent", "tool_agent", "rag_agent"]:
     if state.get("requires_human", False):
         return "human_review"
     if state.get("intent") == "smalltalk":
         return "smalltalk_agent"
+    if state.get("intent") == "tool_action":
+        return "tool_agent"
     return "rag_agent"
 
 
@@ -495,7 +582,6 @@ def build_hitl_graph(
     workflow = make_hitl_workflow(retrieval_service=retrieval_service, llm=llm, cfg=cfg)
     return workflow.compile(checkpointer=checkpointer)
 
-
 def make_hitl_workflow(
     retrieval_service: SearchService | None = None,
     llm: LLMProvider | None = None,
@@ -512,22 +598,27 @@ def make_hitl_workflow(
     workflow.add_node("human_review", human_review_node)
     workflow.add_node("smalltalk_agent", make_smalltalk_node(llm, cfg))
     workflow.add_node("rag_agent", make_rag_node(llm, retrieval_service, cfg))
+    workflow.add_node("tool_agent", make_tool_agent_node(llm, cfg))
 
+    # Entrypoint edge
     workflow.add_edge(START, "intent_router")
+
+    workflow.add_edge("human_review", END)
+    workflow.add_edge("smalltalk_agent", END)
+    workflow.add_edge("rag_agent", END)
+
     workflow.add_conditional_edges(
         "intent_router",
         route_next_step,
         {
             "human_review": "human_review",
             "smalltalk_agent": "smalltalk_agent",
+            "tool_agent": "tool_agent",
             "rag_agent": "rag_agent",
         },
     )
-    workflow.add_edge("human_review", END)
-    workflow.add_edge("smalltalk_agent", END)
-    workflow.add_edge("rag_agent", END)
+    workflow.add_edge("tool_agent", END)
     return workflow
-
 # Runtime helpers: thread config, per-conversation lock, running a turn
 
 

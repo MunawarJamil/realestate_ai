@@ -1,4 +1,4 @@
-// # 12c HITL - Socket.IO Client for Agency Dashboard
+﻿// # 12c HITL - Socket.IO Client for Agency Dashboard
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '../store/useAuthStore';
 import type { BackendMessage } from './client';
@@ -13,7 +13,8 @@ export interface AgentSocketCallbacks {
   onLeadCreated?: (lead: any) => void;
   onLeadUpdated?: (lead: any) => void;
   onHotLeadAlert?: (lead: any) => void;
-
+  onBookingCreated?: (booking: any) => void;
+  onBookingUpdated?: (booking: any) => void;
 }
 
 export class AgentSocketClient {

@@ -380,19 +380,30 @@
 
 ---
 
-### [ ] Phase 14: Autonomous Agentic Tool Calling (Transactional Actions)
 
-- [ ] **14.1 Property Viewing Booking Tool**:
-  - Tool `schedule_viewing(property_id, visitor_name, phone, preferred_time)`.
-  - Records appointments and alerts assigned agent.
-- [ ] **14.2 Real Estate Financial Calculator Tool**:
-  - Tool `calculate_mortgage(property_price, down_payment, interest_rate, term_years)`.
-  - Provides instant breakdown (monthly EMI, total interest, principal).
-- [ ] **14.3 Structured Inventory Query Tool**:
-  - Tool `query_property_catalog(min_price, max_price, location, bedrooms)`.
-  - Performs direct SQL/relational queries for exact filter matches alongside semantic search.
-- [ ] **14.4 LangGraph Tool Node & Router Loop**:
-  - Bind tools to LangGraph agents with validation and structured action execution.
+### [x] Phase 14: Autonomous Agentic Tool Calling (Transactional Actions) (COMPLETED ✅)
+
+- [x] **14.1 Property Viewing Booking Tool**:
+  - `ViewingBooking` model in `src/app/modules/bookings/models.py` with multi-tenant isolation, rate-limiting (max 3/day per visitor phone), and status lifecycle (`pending`, `confirmed`, `canceled`).
+  - Full CRUD and filter endpoints mounted at `/api/v1/bookings`.
+  - Tool callable `schedule_viewing(tenant_id, conversation_id, visitor_name, phone, preferred_time, property_ref)` in `src/app/modules/bookings/tool.py`.
+- [x] **14.2 Real Estate Financial Calculator Tool**:
+  - Pure stateless reducing-balance amortization engine in `src/app/modules/calculator/engine.py`.
+  - Tool callable `calculate_mortgage_tool(property_price, down_payment, annual_interest_rate, term_years)` in `src/app/modules/calculator/tool.py`.
+  - Public REST endpoint mounted at `/api/v1/calculator/mortgage`.
+- [x] **14.3 Structured Inventory Query Tool**:
+  - Multi-tenant `Property` inventory model in `src/app/modules/properties/models.py` with relational indices on `price`, `property_type`, `location`, and `bedrooms`.
+  - Full catalog CRUD and filtering at `/api/v1/properties`.
+  - Tool callable `query_property_catalog(tenant_id, min_price, max_price, location, bedrooms, property_type, listing_type)` in `src/app/modules/properties/tool.py`.
+- [x] **14.4 LangGraph Tool Node & Router Loop**:
+  - Tool registry and OpenAI-compatible schema dispatcher in `src/app/modules/chat/tools.py`.
+  - Integrated `tool_agent` node in `src/app/modules/chat/hitl_graph.py` with intent signal detection and dynamic routing loop.
+  - Verified compilation and registry of all 3 transactional tools in compiled LangGraph workflow.
+  - Built Agency Frontend Dashboard Pages:
+    - `AgencyBookingsPage.tsx`: Real-time viewing appointments management with live Socket.IO alerts and confirm/cancel lifecycle.
+    - `AgencyPropertiesPage.tsx`: Live property inventory management with search, filter, and modal listing editor.
+    - Added Appointments and Inventory to `AgencyLayout` sidebar navigation and TanStack `router.tsx`.
+    - Production Vite build (`tsc -b && vite build`) and unit tests verified with 100% pass rate.
 
 ---
 
