@@ -38,3 +38,10 @@ pnpm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+
+# Docs & AI context
+progress.md
+agent.md
+AGENTS.md
+plan.md
+requirements.md
