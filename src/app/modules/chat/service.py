@@ -3,7 +3,7 @@ import uuid
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from typing import Any
-
+from langsmith import trace
 from app.integrations.llm.base import ChatMessage, LLMProvider
 from app.integrations.llm.exceptions import LLMError
 from app.modules.chat.enums import ConversationStatus, MessageRole, SenderType
@@ -319,7 +319,6 @@ class ChatService:
             token_count=response.completion_tokens,
         )
         return assistant_message
-
     async def stream_chat(
         self,
         *,
@@ -331,137 +330,141 @@ class ChatService:
         if not clean_text:
             raise InvalidMessageError("Message content cannot be empty.")
 
-        conv = await self.get_conversation(tenant_id=tenant_id, conversation_id=conversation_id)
-
-        # 1. Persist user message
-        user_msg = await self._repository.create_message(
-            tenant_id=tenant_id,
-            conversation_id=conversation_id,
-            role=MessageRole.USER,
-            content=clean_text,
-        )
-
-        # # 12b HITL - Detect human handoff request in stream mode
-        from app.modules.chat.handoff import HANDOFF_GUARDRAIL_REPLY, detect_handoff_request
-
-        if conv.status == ConversationStatus.AI and detect_handoff_request(
-            clean_text, conv.metadata_
+        with trace(
+            name="realestate_rag_chat",
+            run_type="chain",
+            metadata={"tenant_id": str(tenant_id), "conversation_id": str(conversation_id)},
+            inputs={"user_message": clean_text},
         ):
-            await self._repository.update_conversation_status(
-                tenant_id=tenant_id,
-                conversation_id=conversation_id,
-                status=ConversationStatus.HANDOFF_REQUESTED,
-            )
-            assistant_msg = await self._repository.create_message(
-                tenant_id=tenant_id,
-                conversation_id=conversation_id,
-                role=MessageRole.ASSISTANT,
-                sender_type=SenderType.AI,
-                content=HANDOFF_GUARDRAIL_REPLY,
-            )
-            try:
-                from app.modules.chat.socketio_server import sio
+            conv = await self.get_conversation(tenant_id=tenant_id, conversation_id=conversation_id)
 
-                await sio.emit(
-                    "handoff_requested",
-                    {
+            # 1. Persist user message
+            user_msg = await self._repository.create_message(
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                role=MessageRole.USER,
+                content=clean_text,
+            )
+
+            # # 12b HITL - Detect human handoff request in stream mode
+            from app.modules.chat.handoff import HANDOFF_GUARDRAIL_REPLY, detect_handoff_request
+
+            if conv.status == ConversationStatus.AI and detect_handoff_request(
+                clean_text, conv.metadata_
+            ):
+                await self._repository.update_conversation_status(
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    status=ConversationStatus.HANDOFF_REQUESTED,
+                )
+                assistant_msg = await self._repository.create_message(
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    role=MessageRole.ASSISTANT,
+                    sender_type=SenderType.AI,
+                    content=HANDOFF_GUARDRAIL_REPLY,
+                )
+                try:
+                    from app.modules.chat.socketio_server import sio
+
+                    await sio.emit(
+                        "handoff_requested",
+                        {
+                            "conversation_id": str(conversation_id),
+                            "reason": "guardrail_trigger",
+                            "visitor_message": clean_text,
+                            "created_at": datetime.now(UTC).isoformat(),
+                        },
+                        room=f"tenant_{tenant_id}_agents",
+                    )
+                    await sio.emit(
+                        "new_message",
+                        {
+                            "id": str(assistant_msg.id),
+                            "conversation_id": str(conversation_id),
+                            "role": "assistant",
+                            "sender_type": "ai",
+                            "content": HANDOFF_GUARDRAIL_REPLY,
+                            "created_at": datetime.now(UTC).isoformat(),
+                        },
+                        room=f"conv_{conversation_id}",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Could not broadcast handoff event from stream_chat to Socket.IO: %r", exc
+                    )
+
+                for token in HANDOFF_GUARDRAIL_REPLY.split(" "):
+                    yield token + " "
+                return
+
+            # 12b HITL - If human agent is active or handoff is queued, AI agent remains silent!
+            if conv.status in (ConversationStatus.HUMAN_ACTIVE, ConversationStatus.HANDOFF_REQUESTED):
+                try:
+                    from app.modules.chat.socketio_server import sio
+
+                    msg_payload = {
+                        "id": str(user_msg.id),
                         "conversation_id": str(conversation_id),
-                        "reason": "guardrail_trigger",
-                        "visitor_message": clean_text,
+                        "role": "user",
+                        "sender_type": "visitor",
+                        "content": user_msg.content,
                         "created_at": datetime.now(UTC).isoformat(),
-                    },
-                    room=f"tenant_{tenant_id}_agents",
-                )
-                await sio.emit(
-                    "new_message",
-                    {
-                        "id": str(assistant_msg.id),
-                        "conversation_id": str(conversation_id),
-                        "role": "assistant",
-                        "sender_type": "ai",
-                        "content": HANDOFF_GUARDRAIL_REPLY,
-                        "created_at": datetime.now(UTC).isoformat(),
-                    },
-                    room=f"conv_{conversation_id}",
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Could not broadcast handoff event from stream_chat to Socket.IO: %r", exc
-                )
+                    }
+                    await sio.emit("new_message", msg_payload, room=f"conv_{conversation_id}")
+                    await sio.emit("visitor_activity", msg_payload, room=f"tenant_{tenant_id}_agents")
+                except Exception as exc:
+                    logger.warning("Could not broadcast buyer message to Socket.IO: %r", exc)
+                return
 
-            for token in HANDOFF_GUARDRAIL_REPLY.split(" "):
-                yield token + " "
-            return
-
-        # 12b HITL - If human agent is active or handoff is queued, AI agent remains silent!
-        if conv.status in (ConversationStatus.HUMAN_ACTIVE, ConversationStatus.HANDOFF_REQUESTED):
-            try:
-                from app.modules.chat.socketio_server import sio
-
-                msg_payload = {
-                    "id": str(user_msg.id),
-                    "conversation_id": str(conversation_id),
-                    "role": "user",
-                    "sender_type": "visitor",
-                    "content": user_msg.content,
-                    "created_at": datetime.now(UTC).isoformat(),
-                }
-                await sio.emit("new_message", msg_payload, room=f"conv_{conversation_id}")
-                await sio.emit("visitor_activity", msg_payload, room=f"tenant_{tenant_id}_agents")
-            except Exception as exc:
-                logger.warning("Could not broadcast buyer message to Socket.IO: %r", exc)
-            return
-
-        # 2. Fetch history
-        history_records = await self._repository.get_recent_messages(
-            tenant_id=tenant_id,
-            conversation_id=conversation_id,
-            limit=11,
-        )
-        history = [
-            ChatMessage(role=msg.role.value, content=msg.content) for msg in history_records[:-1]
-        ]
-
-        # 3. Retrieve relevant chunks (bypassed for pure chit-chat / greetings)
-        chunks: Sequence[RetrievedChunk] = []
-        if not should_skip_retrieval(clean_text):
-            search_query = await self._condense_query(user_query=clean_text, history=history)
-            try:
-                chunks = await self._retrieval.search(tenant_id=tenant_id, query=search_query)
-            except Exception as exc:
-                logger.warning("Knowledge retrieval failed for chat: %r", exc)
-                chunks = []
-        else:
-            logger.debug("Skipping knowledge retrieval for chit-chat inquiry: '%s'", clean_text)
-
-
-
-        # 4. Build prompt
-        prompt_messages = build_chat_messages(
-            user_query=clean_text,
-            context_chunks=chunks,
-            history=history,
-        )
-
-        # 5. Stream tokens and accumulate for DB persistence
-        accumulated: list[str] = []
-        try:
-            async for token in self._llm.stream(prompt_messages):
-                accumulated.append(token)
-                yield token
-        except LLMError as exc:
-            logger.error("LLM stream failed: %r", exc)
-            raise ChatServiceUnavailableError("AI streaming generation unavailable.") from exc
-
-        # 6. Persist final assistant response
-        final_content = "".join(accumulated).strip()
-        if final_content:
-            await self._repository.create_message(
+            # 2. Fetch history
+            history_records = await self._repository.get_recent_messages(
                 tenant_id=tenant_id,
                 conversation_id=conversation_id,
-                role=MessageRole.ASSISTANT,
-                content=final_content,
+                limit=11,
             )
+            history = [
+                ChatMessage(role=msg.role.value, content=msg.content) for msg in history_records[:-1]
+            ]
+
+            # 3. Retrieve relevant chunks (bypassed for pure chit-chat / greetings)
+            chunks: Sequence[RetrievedChunk] = []
+            if not should_skip_retrieval(clean_text):
+                search_query = await self._condense_query(user_query=clean_text, history=history)
+                try:
+                    chunks = await self._retrieval.search(tenant_id=tenant_id, query=search_query)
+                except Exception as exc:
+                    logger.warning("Knowledge retrieval failed for chat: %r", exc)
+                    chunks = []
+            else:
+                logger.debug("Skipping knowledge retrieval for chit-chat inquiry: '%s'", clean_text)
+
+            # 4. Build prompt
+            prompt_messages = build_chat_messages(
+                user_query=clean_text,
+                context_chunks=chunks,
+                history=history,
+            )
+
+            # 5. Stream tokens and accumulate for DB persistence
+            accumulated: list[str] = []
+            try:
+                async for token in self._llm.stream(prompt_messages):
+                    accumulated.append(token)
+                    yield token
+            except LLMError as exc:
+                logger.error("LLM stream failed: %r", exc)
+                raise ChatServiceUnavailableError("AI streaming generation unavailable.") from exc
+
+            # 6. Persist final assistant response
+            final_content = "".join(accumulated).strip()
+            if final_content:
+                await self._repository.create_message(
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    role=MessageRole.ASSISTANT,
+                    content=final_content,
+                )
 
     # 12b HITL - Agent Claim Conversation
     async def claim_conversation(

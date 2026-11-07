@@ -1,0 +1,3 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,POST /stream (SSE),CatchResponseError('status 500'),147,2026-11-07T13:50:01Z,2026-11-07T13:51:14Z
+POST,POST /conversations,CatchResponseError('create failed: 500'),10,2026-11-07T13:50:01Z,2026-11-07T13:50:25Z

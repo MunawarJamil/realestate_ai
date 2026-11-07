@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import socketio
 import structlog
 from fastapi import FastAPI
+from starlette.responses import Response
 from app.modules.leads.router import router as leads_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -25,6 +26,12 @@ from app.workers.queue import close_queue, init_queue
 from app.modules.bookings.router import router as bookings_router
 from app.modules.calculator.router import router as calculator_router
 from app.modules.properties.router import router as properties_router
+
+from app.core.middleware import RequestContextMiddleware
+from app.core.request_context import tenant_id_ctx
+from app.core.observability.telemetry import prometheus_metrics_endpoint
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     log = structlog.get_logger()
@@ -50,9 +57,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level, json_logs=settings.is_production)
+    if settings.sentry_dsn:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.app_env,
+            traces_sample_rate=0.2 if settings.is_production else 1.0,
+            send_default_pii=False,
+        )
 
     app = FastAPI(
         title="RealEstate AI",
@@ -65,6 +82,10 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+    @app.get("/metrics", tags=["system"], include_in_schema=False)
+    async def metrics() -> Response:
+        return prometheus_metrics_endpoint()
+
 
     from fastapi.middleware.cors import CORSMiddleware
 
@@ -74,7 +95,9 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
+    app.add_middleware(RequestContextMiddleware)
 
     return app
 

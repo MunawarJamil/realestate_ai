@@ -23,6 +23,7 @@ dependencies = [
     "langgraph-cli[inmem]>=0.1.54",
     "langsmith>=0.14.11",
     "openai>=3.35.1",
+    "prometheus-client>=0.26.0",
     "psycopg[binary,pool]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.0",
@@ -31,6 +32,7 @@ dependencies = [
     "python-multipart>=0.0.32",
     "python-socketio>=5.17.0",
     "qdrant-client>=1.19.1",
+    "sentry-sdk[fastapi]>=2.74.0",
     "sqlalchemy[asyncio]>=2.1.4",
     "sse-starlette>=3.5.0",
     "structlog>=26.1.0",
@@ -46,6 +48,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "locust>=2.47.0",
     "mypy>=2.4.0",
     "pre-commit>=4.7.0",
     "pytest>=9.1.1",

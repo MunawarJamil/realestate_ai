@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 import json
 import logging
+import time
 from typing import Final, NoReturn
 import uuid
 
@@ -27,7 +28,7 @@ from app.modules.chat.schemas import (
 from app.modules.chat.service import ChatService
 from app.modules.tenants.dependencies import get_current_tenant
 from app.modules.tenants.models import Tenant
-
+from app.core.observability.telemetry import ACTIVE_SSE_CONNECTIONS, CHAT_TTFT_SECONDS
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -150,9 +151,14 @@ async def send_message(
         _raise_http(exc)
 
 
-async def _sse_streamer(tokens: AsyncIterator[str]) -> AsyncIterator[str]:
+
+async def _sse_streamer(tokens: AsyncIterator[str], start_time: float) -> AsyncIterator[str]:
+    ttft_recorded = False
     try:
         async for token in tokens:
+            if not ttft_recorded:
+                CHAT_TTFT_SECONDS.observe(time.perf_counter() - start_time)
+                ttft_recorded = True
             payload = json.dumps({"token": token})
             yield f"data: {payload}\n\n"
         yield "data: [DONE]\n\n"
@@ -185,8 +191,18 @@ async def stream_chat(
         user_message=body.content,
     )
 
+    start_time = time.perf_counter()
+    ACTIVE_SSE_CONNECTIONS.inc()
+
+    async def tracked_streamer() -> AsyncIterator[str]:
+        try:
+            async for chunk in _sse_streamer(stream_generator, start_time):
+                yield chunk
+        finally:
+            ACTIVE_SSE_CONNECTIONS.dec()
+
     return StreamingResponse(
-        _sse_streamer(stream_generator),
+        tracked_streamer(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

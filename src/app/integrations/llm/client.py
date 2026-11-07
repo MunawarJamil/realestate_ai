@@ -1,20 +1,21 @@
-﻿import logging
+import logging
 from collections.abc import AsyncIterator, Sequence
 from typing import Any, cast
 from langsmith.wrappers import wrap_openai
-
+import asyncio
 import openai
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from app.core.config import Settings
-from app.integrations.llm.base import ChatMessage, LLMResponse, ToolCallData
+from app.integrations.llm.base import ChatMessage, LLMResponse, ToolCallData ,LLMProvider
 from app.integrations.llm.exceptions import (
     LLMBadResponseError,
     LLMError,
     LLMRateLimitError,
     LLMUnavailableError,
 )
+ 
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,63 @@ class OpenRouterLLMClient:
         await self._client.close()
 
 
-def build_llm_client(settings: Settings) -> OpenRouterLLMClient:
+
+
+
+class StubLLMClient:
+    """Simulates realistic streaming LLM behavior for high-concurrency load testing.
+    
+    Bypasses third-party rate limits while testing FastAPI event loops,
+    database connection holding, and Qdrant retrieval under load.
+    """
+
+    def __init__(self, token_delay_sec: float = 0.02) -> None:
+        self.token_delay_sec = token_delay_sec
+
+    async def complete(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        tools: Sequence[dict] | None = None,
+    ) -> LLMResponse:
+        await asyncio.sleep(0.1)  # realistic network roundtrip
+        return LLMResponse(
+            content="This is a stubbed response for Dubai Marina property inquiries.",
+            model="stub-model-v1",
+            prompt_tokens=50,
+            completion_tokens=20,
+        )
+
+    async def stream(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> AsyncIterator[str]:
+        # Realistic 25-token streaming response
+        tokens = [
+            "We ", "have ", "several ", "luxury ", "2-bedroom ", "apartments ",
+            "available ", "in ", "Dubai ", "Marina ", "starting ", "from ",
+            "AED ", "1,450,000. ", "Would ", "you ", "like ", "to ", "schedule ",
+            "a ", "viewing ", "this ", "weekend?"
+        ]
+        # Simulate initial TTFT processing delay
+        await asyncio.sleep(0.08)
+        for token in tokens:
+            await asyncio.sleep(self.token_delay_sec)
+            yield token
+
+    async def close(self) -> None:
+        pass
+
+
+def build_llm_client(settings: Settings) -> LLMProvider:
+    if getattr(settings, "llm_provider", "openrouter").lower() == "stub":
+        return StubLLMClient()
+
     api_key = settings.openrouter_api_key.get_secret_value() or "not-configured"
     sdk = AsyncOpenAI(
         api_key=api_key,
@@ -154,3 +211,4 @@ def build_llm_client(settings: Settings) -> OpenRouterLLMClient:
         default_max_tokens=settings.llm_max_tokens,
         default_temperature=settings.llm_temperature,
     )
+

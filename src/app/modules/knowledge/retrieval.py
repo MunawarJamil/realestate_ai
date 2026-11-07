@@ -2,7 +2,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
-
+from langsmith import traceable
 from langchain_core.callbacks import (
     AsyncCallbackManagerForRetrieverRun,
     CallbackManagerForRetrieverRun,
@@ -173,6 +173,8 @@ class RetrievalService:
             tenant_id=tenant_id,
             limit=limit or self._default_limit,
         )
+
+
 
     async def search(
         self, *, tenant_id: uuid.UUID, query: str, limit: int | None = None

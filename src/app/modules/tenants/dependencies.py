@@ -6,6 +6,7 @@ from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBea
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
+from app.core.request_context import tenant_id_ctx
 from app.core.security import AUDIENCE_AGENCY, decode_user_token
 from app.db.session import get_session
 from app.modules.tenants.models import Tenant
@@ -42,6 +43,7 @@ async def get_current_tenant(
                             status_code=status.HTTP_403_FORBIDDEN,
                             detail="Agency tenant account has been deactivated.",
                         )
+                    tenant_id_ctx.set(str(tenant.id))
                     return tenant
         except HTTPException:
             raise
@@ -57,6 +59,7 @@ async def get_current_tenant(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Agency tenant account has been deactivated.",
                 )
+            tenant_id_ctx.set(str(tenant.id))
             return tenant
 
     raise HTTPException(

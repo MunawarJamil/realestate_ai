@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import httpx
 
 from app.core.config import get_settings
+from app.integrations.embeddings.base import EmbeddingProvider
 from app.integrations.embeddings.exceptions import EmbeddingDimensionError, EmbeddingError
 
 logger = logging.getLogger(__name__)
@@ -129,20 +130,41 @@ class EmbeddingClient:
             return None
 
 
-_client: EmbeddingClient | None = None
+class StubEmbeddingClient:
+    """Mock embedding client for load testing without network calls or rate limits."""
+
+    def __init__(self, dimension: int = 1536) -> None:
+        self._dimension = dimension
+
+    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        return [[0.01] * self._dimension for _ in texts]
+
+    async def embed_query(self, text: str) -> list[float]:
+        return [0.01] * self._dimension
+
+    async def aclose(self) -> None:
+        pass
 
 
-def init_embedding_client() -> EmbeddingClient:
+_client: EmbeddingProvider | None = None
+
+
+def init_embedding_client() -> EmbeddingProvider:
     global _client
     if _client is None:
-        _client = EmbeddingClient()
+        settings = get_settings()
+        if getattr(settings, "llm_provider", "openrouter").lower() == "stub":
+            _client = StubEmbeddingClient(dimension=settings.embedding_dimension)
+        else:
+            _client = EmbeddingClient()
     return _client
 
 
-def get_embedding_client() -> EmbeddingClient:
+def get_embedding_client() -> EmbeddingProvider:
     if _client is None:
         raise RuntimeError("Embedding client is not initialised. Call init_embedding_client().")
     return _client
+
 
 
 async def close_embedding_client() -> None:

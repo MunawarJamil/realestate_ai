@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     embedding_max_concurrency: int = 2
     embedding_timeout_seconds: float = 60.0
     embedding_max_retries: int = 5
+    # for load testing 
+    llm_provider: str = Field(default="openrouter", alias="LLM_PROVIDER")
     # Chunking (sizes are in characters; ~4 chars per token for English)
     chunk_size_chars: int = Field(default=1500, gt=0)
     chunk_overlap_chars: int = Field(default=200, ge=0)
@@ -52,7 +54,8 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 500
     llm_temperature: float = 0.3
     llm_timeout_seconds: float = 30.0
-    llm_max_retries: int = 2
+    llm_max_retries: int = 2      # Sentry Error Monitoring
+    sentry_dsn: str | None = Field(default=None, alias="SENTRY_DSN")
 
 
     @property
