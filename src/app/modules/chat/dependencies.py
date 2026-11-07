@@ -1,7 +1,7 @@
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_session
+from app.db.session import get_session, session_scope
 from app.integrations.llm.base import LLMProvider
 from app.modules.chat.repository import ChatRepository
 from app.modules.chat.service import ChatService
@@ -22,4 +22,22 @@ def get_chat_service(
         repository=ChatRepository(session),
         retrieval=retrieval,
         llm=llm,
+        session_scope=session_scope,
+    )
+
+
+def get_streaming_chat_service(
+    retrieval: RetrievalService = Depends(get_retrieval_service),
+    llm: LLMProvider = Depends(get_llm_client),
+) -> ChatService:
+    """Provides a ChatService instance specifically for streaming endpoints.
+
+    Does NOT depend on `get_session`, guaranteeing zero database connections
+    are held open during the multi-second LLM streaming loop.
+    """
+    return ChatService(
+        repository=ChatRepository(None),  # type: ignore[arg-type]
+        retrieval=retrieval,
+        llm=llm,
+        session_scope=session_scope,
     )

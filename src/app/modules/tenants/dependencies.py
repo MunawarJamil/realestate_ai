@@ -12,7 +12,7 @@ from app.db.session import get_session
 from app.modules.tenants.models import Tenant
 from app.modules.tenants.repository import TenantRepository
 from app.modules.tenants.service import TenantService
-
+from app.db.session import get_session, session_scope
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 _bearer_auth = HTTPBearer(auto_error=False)
 
@@ -70,3 +70,23 @@ async def get_current_tenant(
         ),
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+
+async def get_streaming_tenant(
+    api_key: str | None = Depends(api_key_header),
+    auth: HTTPAuthorizationCredentials | None = Depends(_bearer_auth),
+    settings: Settings = Depends(get_settings),
+) -> Tenant:
+    """Authenticates tenant for streaming endpoints using a short-lived DB session.
+
+    Acquires a session for < 1ms to authenticate, then instantly releases the
+    connection back to the pool before the streaming response begins.
+    """
+    async with session_scope() as session:
+        return await get_current_tenant(
+            api_key=api_key,
+            auth=auth,
+            settings=settings,
+            session=session,
+        )

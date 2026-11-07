@@ -1,8 +1,10 @@
 import logging
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
+from sqlalchemy.ext.asyncio import AsyncSession
 from langsmith import trace
 from app.integrations.llm.base import ChatMessage, LLMProvider
 from app.integrations.llm.exceptions import LLMError
@@ -21,6 +23,12 @@ from app.modules.chat.repository import ChatRepository
 from app.modules.chat.routing import should_skip_retrieval
 from app.modules.knowledge.retrieval import RetrievalService, RetrievedChunk
 
+from app.db.session import session_scope
+
+
+
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,10 +41,23 @@ class ChatService:
         repository: ChatRepository,
         retrieval: RetrievalService,
         llm: LLMProvider,
+        session_scope: Callable[[], AbstractAsyncContextManager[AsyncSession]] | None = None,
     ) -> None:
         self._repository = repository
         self._retrieval = retrieval
         self._llm = llm
+        self._session_scope = session_scope
+
+    @asynccontextmanager
+    async def _repo_context(self) -> AsyncIterator[ChatRepository]:
+        """Provides a ChatRepository within a short-lived session (in production)
+        or falls back to self._repository (e.g. for unit tests with a mock).
+        """
+        if self._session_scope is not None:
+            async with self._session_scope() as session:
+                yield ChatRepository(session)
+        else:
+            yield self._repository
 
     async def _condense_query(
         self,
@@ -319,6 +340,8 @@ class ChatService:
             token_count=response.completion_tokens,
         )
         return assistant_message
+
+
     async def stream_chat(
         self,
         *,
@@ -336,34 +359,68 @@ class ChatService:
             metadata={"tenant_id": str(tenant_id), "conversation_id": str(conversation_id)},
             inputs={"user_message": clean_text},
         ):
-            conv = await self.get_conversation(tenant_id=tenant_id, conversation_id=conversation_id)
+            # ─────────────────────────────────────────────────────────────
+            # 1. SHORT-LIVED DB SESSION (< 5ms): Read, Persist & Release!
+            # ─────────────────────────────────────────────────────────────
+            async with self._repo_context() as repo:
+                conv = await repo.get_conversation(
+                    tenant_id=tenant_id, conversation_id=conversation_id
+                )
+                if conv is None:
+                    raise ConversationNotFoundError(
+                        f"Conversation '{conversation_id}' not found for tenant '{tenant_id}'."
+                    )
 
-            # 1. Persist user message
-            user_msg = await self._repository.create_message(
-                tenant_id=tenant_id,
-                conversation_id=conversation_id,
-                role=MessageRole.USER,
-                content=clean_text,
-            )
-
-            # # 12b HITL - Detect human handoff request in stream mode
-            from app.modules.chat.handoff import HANDOFF_GUARDRAIL_REPLY, detect_handoff_request
-
-            if conv.status == ConversationStatus.AI and detect_handoff_request(
-                clean_text, conv.metadata_
-            ):
-                await self._repository.update_conversation_status(
+                user_msg = await repo.create_message(
                     tenant_id=tenant_id,
                     conversation_id=conversation_id,
-                    status=ConversationStatus.HANDOFF_REQUESTED,
+                    role=MessageRole.USER,
+                    content=clean_text,
                 )
-                assistant_msg = await self._repository.create_message(
+                user_msg_id = user_msg.id
+                conv_status = conv.status
+                conv_metadata = dict(conv.metadata_ or {})
+
+                # 12b HITL - Detect human handoff request in stream mode
+                from app.modules.chat.handoff import HANDOFF_GUARDRAIL_REPLY, detect_handoff_request
+
+                is_handoff = False
+                assistant_msg_id = None
+                if conv_status == ConversationStatus.AI and detect_handoff_request(
+                    clean_text, conv_metadata
+                ):
+                    is_handoff = True
+                    await repo.update_conversation_status(
+                        tenant_id=tenant_id,
+                        conversation_id=conversation_id,
+                        status=ConversationStatus.HANDOFF_REQUESTED,
+                    )
+                    assistant_msg = await repo.create_message(
+                        tenant_id=tenant_id,
+                        conversation_id=conversation_id,
+                        role=MessageRole.ASSISTANT,
+                        sender_type=SenderType.AI,
+                        content=HANDOFF_GUARDRAIL_REPLY,
+                    )
+                    assistant_msg_id = assistant_msg.id
+
+                # Fetch history and convert to detached models before releasing DB session
+                history_records = await repo.get_recent_messages(
                     tenant_id=tenant_id,
                     conversation_id=conversation_id,
-                    role=MessageRole.ASSISTANT,
-                    sender_type=SenderType.AI,
-                    content=HANDOFF_GUARDRAIL_REPLY,
+                    limit=11,
                 )
+                history = [
+                    ChatMessage(role=msg.role.value, content=msg.content)
+                    for msg in history_records[:-1]
+                ]
+
+            # ─────────────────────────────────────────────────────────────
+            # DB CONNECTION IS NOW RELEASED BACK TO THE POOL! (0 DB CONNS)
+            # ─────────────────────────────────────────────────────────────
+
+            # Handoff early exit handling
+            if is_handoff:
                 try:
                     from app.modules.chat.socketio_server import sio
 
@@ -380,7 +437,7 @@ class ChatService:
                     await sio.emit(
                         "new_message",
                         {
-                            "id": str(assistant_msg.id),
+                            "id": str(assistant_msg_id),
                             "conversation_id": str(conversation_id),
                             "role": "assistant",
                             "sender_type": "ai",
@@ -398,17 +455,17 @@ class ChatService:
                     yield token + " "
                 return
 
-            # 12b HITL - If human agent is active or handoff is queued, AI agent remains silent!
-            if conv.status in (ConversationStatus.HUMAN_ACTIVE, ConversationStatus.HANDOFF_REQUESTED):
+            # Silent mode if human agent is already active
+            if conv_status in (ConversationStatus.HUMAN_ACTIVE, ConversationStatus.HANDOFF_REQUESTED):
                 try:
                     from app.modules.chat.socketio_server import sio
 
                     msg_payload = {
-                        "id": str(user_msg.id),
+                        "id": str(user_msg_id),
                         "conversation_id": str(conversation_id),
                         "role": "user",
                         "sender_type": "visitor",
-                        "content": user_msg.content,
+                        "content": clean_text,
                         "created_at": datetime.now(UTC).isoformat(),
                     }
                     await sio.emit("new_message", msg_payload, room=f"conv_{conversation_id}")
@@ -417,17 +474,7 @@ class ChatService:
                     logger.warning("Could not broadcast buyer message to Socket.IO: %r", exc)
                 return
 
-            # 2. Fetch history
-            history_records = await self._repository.get_recent_messages(
-                tenant_id=tenant_id,
-                conversation_id=conversation_id,
-                limit=11,
-            )
-            history = [
-                ChatMessage(role=msg.role.value, content=msg.content) for msg in history_records[:-1]
-            ]
-
-            # 3. Retrieve relevant chunks (bypassed for pure chit-chat / greetings)
+            # 2. Retrieve relevant chunks (Qdrant vector search - No Postgres connection used)
             chunks: Sequence[RetrievedChunk] = []
             if not should_skip_retrieval(clean_text):
                 search_query = await self._condense_query(user_query=clean_text, history=history)
@@ -439,14 +486,14 @@ class ChatService:
             else:
                 logger.debug("Skipping knowledge retrieval for chit-chat inquiry: '%s'", clean_text)
 
-            # 4. Build prompt
+            # 3. Build prompt in memory
             prompt_messages = build_chat_messages(
                 user_query=clean_text,
                 context_chunks=chunks,
                 history=history,
             )
 
-            # 5. Stream tokens and accumulate for DB persistence
+            # 4. Stream tokens from LLM (ZERO DB connections held during this loop!)
             accumulated: list[str] = []
             try:
                 async for token in self._llm.stream(prompt_messages):
@@ -456,16 +503,25 @@ class ChatService:
                 logger.error("LLM stream failed: %r", exc)
                 raise ChatServiceUnavailableError("AI streaming generation unavailable.") from exc
 
-            # 6. Persist final assistant response
+            # ─────────────────────────────────────────────────────────────
+            # 5. SHORT-LIVED DB SESSION (< 5ms): Persist final reply & Release!
+            # ─────────────────────────────────────────────────────────────
             final_content = "".join(accumulated).strip()
             if final_content:
-                await self._repository.create_message(
-                    tenant_id=tenant_id,
-                    conversation_id=conversation_id,
-                    role=MessageRole.ASSISTANT,
-                    content=final_content,
-                )
+                async with self._repo_context() as post_repo:
+                    await post_repo.create_message(
+                        tenant_id=tenant_id,
+                        conversation_id=conversation_id,
+                        role=MessageRole.ASSISTANT,
+                        content=final_content,
+                    )
 
+
+
+
+
+   
+   
     # 12b HITL - Agent Claim Conversation
     async def claim_conversation(
         self,

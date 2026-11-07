@@ -9,7 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
 from app.modules.auth.dependencies import AgencyUserContext, require_agency_user  # 12b HITL
-from app.modules.chat.dependencies import get_chat_service
+
+from app.modules.chat.dependencies import get_chat_service, get_streaming_chat_service
+
+
 from app.modules.chat.exceptions import (
     ChatError,
     ChatServiceUnavailableError,
@@ -25,8 +28,10 @@ from app.modules.chat.schemas import (
     MessageRead,
     SendMessageRequest,
 )
+
+from app.modules.tenants.dependencies import get_current_tenant, get_streaming_tenant
+
 from app.modules.chat.service import ChatService
-from app.modules.tenants.dependencies import get_current_tenant
 from app.modules.tenants.models import Tenant
 from app.core.observability.telemetry import ACTIVE_SSE_CONNECTIONS, CHAT_TTFT_SECONDS
 logger = logging.getLogger(__name__)
@@ -171,19 +176,60 @@ async def _sse_streamer(tokens: AsyncIterator[str], start_time: float) -> AsyncI
 @router.post(
     "/conversations/{conversation_id}/stream",
 )
+# async def stream_chat(
+#     conversation_id: uuid.UUID,
+#     body: SendMessageRequest,
+#     tenant: Tenant = Depends(get_current_tenant),
+#     service: ChatService = Depends(get_chat_service),
+# ) -> StreamingResponse:
+#     # First verify conversation exists and message is valid before starting HTTP stream
+#     try:
+#         await service.get_conversation(tenant_id=tenant.id, conversation_id=conversation_id)
+#         if not body.content.strip():
+#             raise InvalidMessageError("Message content cannot be empty.")
+#     except ChatError as exc:
+#         _raise_http(exc)
+
+#     stream_generator = service.stream_chat(
+#         tenant_id=tenant.id,
+#         conversation_id=conversation_id,
+#         user_message=body.content,
+#     )
+
+#     start_time = time.perf_counter()
+#     ACTIVE_SSE_CONNECTIONS.inc()
+
+#     async def tracked_streamer() -> AsyncIterator[str]:
+#         try:
+#             async for chunk in _sse_streamer(stream_generator, start_time):
+#                 yield chunk
+#         finally:
+#             ACTIVE_SSE_CONNECTIONS.dec()
+
+#     return StreamingResponse(
+#         tracked_streamer(),
+#         media_type="text/event-stream",
+#         headers={
+#             "Cache-Control": "no-cache",
+#             "Connection": "keep-alive",
+#             "X-Accel-Buffering": "no",
+#         },
+#     )
+
+
+# New Implementation of decoupled version of streaming chat
+# Now it uses a separate database connection pool
+@router.post(
+    "/conversations/{conversation_id}/stream",
+)
 async def stream_chat(
     conversation_id: uuid.UUID,
     body: SendMessageRequest,
-    tenant: Tenant = Depends(get_current_tenant),
-    service: ChatService = Depends(get_chat_service),
+    tenant: Tenant = Depends(get_streaming_tenant),
+    service: ChatService = Depends(get_streaming_chat_service),
 ) -> StreamingResponse:
-    # First verify conversation exists and message is valid before starting HTTP stream
-    try:
-        await service.get_conversation(tenant_id=tenant.id, conversation_id=conversation_id)
-        if not body.content.strip():
-            raise InvalidMessageError("Message content cannot be empty.")
-    except ChatError as exc:
-        _raise_http(exc)
+    if not body.content.strip():
+        _raise_http(InvalidMessageError("Message content cannot be empty."))
 
     stream_generator = service.stream_chat(
         tenant_id=tenant.id,
@@ -210,6 +256,13 @@ async def stream_chat(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+
+
+
+
+
 
 
 # 12b HITL - Agent Claim Conversation Endpoint
