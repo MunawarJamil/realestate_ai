@@ -56,7 +56,12 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 30.0
     llm_max_retries: int = 2      # Sentry Error Monitoring
     sentry_dsn: str | None = Field(default=None, alias="SENTRY_DSN")
-
+    
+    # Database Pooling (Scaled for PgBouncer)
+    db_pool_size: int = Field(default=30, ge=1, le=100)
+    db_max_overflow: int = Field(default=20, ge=0, le=50)
+    db_pool_timeout: float = Field(default=5.0, gt=0)
+    pgbouncer_mode: bool = Field(default=True, alias="PGBOUNCER_MODE")
 
     @property
     def is_production(self) -> bool:

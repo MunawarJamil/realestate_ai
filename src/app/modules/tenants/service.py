@@ -1,3 +1,4 @@
+import json
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -74,8 +75,71 @@ class TenantService:
             admin_user=created_admin,
         )
 
+    # async def authenticate(self, raw_api_key: str) -> Tenant | None:
+    #     return await self._repo.get_by_api_key_hash(hash_api_key(raw_api_key))
+
     async def authenticate(self, raw_api_key: str) -> Tenant | None:
-        return await self._repo.get_by_api_key_hash(hash_api_key(raw_api_key))
+        if not raw_api_key.startswith("rk_live_"):
+            return None
+
+        key_hash = hash_api_key(raw_api_key)
+
+        # 1. Try Redis cache first (Completely bypasses Postgres for streaming requests)
+        try:
+            from app.modules.chat.redis_pubsub import get_redis_client
+
+            redis = get_redis_client()
+            if redis is not None:
+                cached = await redis.get(f"auth:tenant:hash:{key_hash}")
+                if cached:
+                    raw_str = cached.decode("utf-8") if isinstance(cached, bytes) else str(cached)
+                    data = json.loads(raw_str)
+                    if not data.get("is_active", True):
+                        return None
+                    return Tenant(
+                        id=uuid.UUID(data["id"]),
+                        name=data["name"],
+                        slug=data["slug"],
+                        api_key_hash=data["api_key_hash"],
+                        api_key_prefix=data["api_key_prefix"],
+                        widget_key=data["widget_key"],
+                        allowed_domains=data.get("allowed_domains", []),
+                        is_active=data.get("is_active", True),
+                    )
+        except Exception:
+            pass  # Fall back to database lookup gracefully
+
+        # 2. Database Lookup via self._repo
+        tenant = await self._repo.get_by_api_key_hash(key_hash)
+        if tenant is None or not tenant.is_active:
+            return None
+
+        # 3. Cache full tenant in Redis for 60 seconds
+        try:
+            from app.modules.chat.redis_pubsub import get_redis_client
+
+            redis = get_redis_client()
+            if redis is not None:
+                payload = json.dumps(
+                    {
+                        "id": str(tenant.id),
+                        "name": tenant.name,
+                        "slug": tenant.slug,
+                        "api_key_hash": tenant.api_key_hash,
+                        "api_key_prefix": tenant.api_key_prefix,
+                        "widget_key": tenant.widget_key,
+                        "allowed_domains": tenant.allowed_domains,
+                        "is_active": tenant.is_active,
+                    }
+                )
+                await redis.set(f"auth:tenant:hash:{key_hash}", payload, ex=60)
+        except Exception:
+            pass
+
+        return tenant
+
+
+
 
     async def get_by_widget_key(self, widget_key: str) -> Tenant | None:
         return await self._repo.get_by_widget_key(widget_key)

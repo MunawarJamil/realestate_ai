@@ -50,6 +50,9 @@ class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     on_startup = on_startup
     on_shutdown = on_shutdown
-    max_jobs = 4
-    keep_result = 3600
-    health_check_interval = 30
+    
+    # 2 vCPU Droplet optimization: bounded concurrency prevents CPU starvation for live chat
+    max_jobs = 2
+    job_timeout = 600           # 10 minutes max per document
+    keep_result = 3600          # Keep job results in Redis for 1 hour
+    health_check_interval = 30  # Heartbeat every 30s

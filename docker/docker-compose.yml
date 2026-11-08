@@ -1,4 +1,4 @@
-name: realestate-ai
+name: realestate-ai-dev
 
 x-app: &app
   build:
@@ -11,27 +11,137 @@ x-app: &app
     - ../migrations:/app/migrations
     - uploads:/app/var/uploads
   depends_on:
-    postgres:
+    pgbouncer:
       condition: service_healthy
     redis:
       condition: service_healthy
     qdrant:
       condition: service_started
+  networks:
+    - realestate-net
 
 services:
-  api:
+  # ----------------------------------------------------------------------------
+  # FastAPI Replica 1 (Dev / Hot-Reload)
+  # ----------------------------------------------------------------------------
+  api_1:
     <<: *app
+    container_name: realestate_api_dev_1
+    environment:
+      - INSTANCE_ID=api_1
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    ports:
-      - "8000:8000"
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
 
+  # ----------------------------------------------------------------------------
+  # FastAPI Replica 2 (Dev / Hot-Reload)
+  # ----------------------------------------------------------------------------
+  api_2:
+    <<: *app
+    container_name: realestate_api_dev_2
+    environment:
+      - INSTANCE_ID=api_2
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+  # ----------------------------------------------------------------------------
+  # FastAPI Replica 3 (Dev / Hot-Reload)
+  # ----------------------------------------------------------------------------
+  api_3:
+    <<: *app
+    container_name: realestate_api_dev_3
+    environment:
+      - INSTANCE_ID=api_3
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+  # ----------------------------------------------------------------------------
+  # Nginx Load Balancer (Round Robin to api_1, api_2, api_3 on Port 80)
+  # ----------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: realestate_nginx_dev
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api_1:
+        condition: service_healthy
+      api_2:
+        condition: service_healthy
+      api_3:
+        condition: service_healthy
+    networks:
+      - realestate-net
+
+  # ----------------------------------------------------------------------------
+  # ARQ Background Worker
+  # ----------------------------------------------------------------------------
   worker:
     <<: *app
+    container_name: realestate_worker_dev
     command: arq app.workers.settings.WorkerSettings
     init: true
+    restart: on-failure
 
+  # ----------------------------------------------------------------------------
+  # PgBouncer (Transaction Pooling Layer on Port 6432)
+  # ----------------------------------------------------------------------------
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: realestate_pgbouncer_dev
+    restart: unless-stopped
+    environment:
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=realestate
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=200
+      - DEFAULT_POOL_SIZE=20
+      - LISTEN_PORT=6432
+      - MIN_POOL_SIZE=5
+      - RESERVE_POOL_SIZE=5
+      - SERVER_IDLE_TIMEOUT=60
+      - AUTH_TYPE=scram-sha-256
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U postgres -d realestate"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - realestate-net
+
+  # ----------------------------------------------------------------------------
+  # PostgreSQL 16 (Preserves existing pgdata volume & migrations)
+  # ----------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
+    container_name: realestate_postgres_dev
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -45,9 +155,15 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - realestate-net
 
+  # ----------------------------------------------------------------------------
+  # Redis 7
+  # ----------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
+    container_name: realestate_redis_dev
     ports:
       - "6379:6379"
     volumes:
@@ -57,17 +173,28 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - realestate-net
 
+  # ----------------------------------------------------------------------------
+  # Qdrant (Existing local volume & collections)
+  # ----------------------------------------------------------------------------
   qdrant:
     image: qdrant/qdrant:v1.12.4
+    container_name: realestate_qdrant_dev
     ports:
       - "6333:6333"
     volumes:
       - qdrantdata:/qdrant/storage
+    networks:
+      - realestate-net
 
+  # ----------------------------------------------------------------------------
+  # Prometheus Telemetry (Scraping all 3 instances)
+  # ----------------------------------------------------------------------------
   prometheus:
     image: prom/prometheus:v2.51.0
-    container_name: realestate_prometheus
+    container_name: realestate_prometheus_dev
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -77,11 +204,18 @@ services:
     ports:
       - "9090:9090"
     depends_on:
-      - api
+      - api_1
+      - api_2
+      - api_3
+    networks:
+      - realestate-net
 
+  # ----------------------------------------------------------------------------
+  # Grafana Dashboard
+  # ----------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:10.4.0
-    container_name: realestate_grafana
+    container_name: realestate_grafana_dev
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
@@ -92,6 +226,8 @@ services:
       - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
+    networks:
+      - realestate-net
 
 volumes:
   pgdata:
@@ -100,3 +236,7 @@ volumes:
   uploads:
   prometheus_data:
   grafana_data:
+
+networks:
+  realestate-net:
+    driver: bridge

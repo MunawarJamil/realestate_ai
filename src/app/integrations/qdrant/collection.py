@@ -13,25 +13,34 @@ TEXT_FIELD = "text"
 
 
 async def ensure_collection(client: AsyncQdrantClient) -> None:
-    """Create the shared multi-tenant collection if missing; fail fast on config drift."""
+    """Ensure the shared multi-tenant collection and all required indexes exist."""
+
     settings = get_settings()
     name = settings.qdrant_collection
 
     if await client.collection_exists(name):
         await _validate_collection(client, name)
         logger.info("Qdrant collection '%s' already exists", name)
-        return
+    else:
+        await client.create_collection(
+            collection_name=name,
+            vectors_config=models.VectorParams(
+                size=settings.embedding_dimension,
+                distance=models.Distance.COSINE,
+            ),
+            hnsw_config=models.HnswConfigDiff(
+                m=0,
+                payload_m=16,
+            ),
+        )
+        logger.info(
+            "Created Qdrant collection '%s' (dim=%s)",
+            name,
+            settings.embedding_dimension,
+        )
 
-    await client.create_collection(
-        collection_name=name,
-        vectors_config=models.VectorParams(
-            size=settings.embedding_dimension,
-            distance=models.Distance.COSINE,
-        ),
-        # Multitenancy: build HNSW per tenant (payload_m) instead of one global graph (m=0).
-        # Every query MUST filter by tenant_id.
-        hnsw_config=models.HnswConfigDiff(m=0, payload_m=16),
-    )
+    # Ensure indexes regardless of whether collection was newly created
+    # or already existed. This also repairs partially initialized collections.
 
     await client.create_payload_index(
         collection_name=name,
@@ -41,13 +50,13 @@ async def ensure_collection(client: AsyncQdrantClient) -> None:
             is_tenant=True,
         ),
     )
-    # Needed for fast delete/filter of all chunks belonging to one document.
+
     await client.create_payload_index(
         collection_name=name,
         field_name=DOCUMENT_FIELD,
         field_schema=models.PayloadSchemaType.KEYWORD,
     )
-    # Full-text keyword index for exact alphanumeric match (unit codes, project names, prices)
+
     await client.create_payload_index(
         collection_name=name,
         field_name=TEXT_FIELD,
@@ -60,8 +69,8 @@ async def ensure_collection(client: AsyncQdrantClient) -> None:
         ),
     )
 
+    logger.info("Qdrant indexes ensured for collection '%s'", name)
 
-    logger.info("Created Qdrant collection '%s' (dim=%s)", name, settings.embedding_dimension)
 
 
 async def _validate_collection(client: AsyncQdrantClient, name: str) -> None:

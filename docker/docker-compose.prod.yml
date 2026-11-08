@@ -1,0 +1,248 @@
+name: realestate-ai-prod
+
+x-prod-app: &prod-app
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  env_file:
+    - ../.env
+  volumes:
+  - uploads_prod:/app/var/uploads
+  depends_on:
+    pgbouncer:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - realestate-prod-net
+  deploy:
+    resources:
+      limits:
+        cpus: "0.60"
+        memory: 650M
+      reservations:
+        cpus: "0.15"
+        memory: 256M
+
+services:
+  # ----------------------------------------------------------------------------
+  # FastAPI Replica 1
+  # ----------------------------------------------------------------------------
+  api_1:
+    <<: *prod-app
+    container_name: realestate_api_prod_1
+    environment:
+      - INSTANCE_ID=api_1
+    command: gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:8000 --access-logfile - --error-logfile -
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
+  # ----------------------------------------------------------------------------
+  # FastAPI Replica 2
+  # ----------------------------------------------------------------------------
+  api_2:
+    <<: *prod-app
+    container_name: realestate_api_prod_2
+    environment:
+      - INSTANCE_ID=api_2
+    command: gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:8000 --access-logfile - --error-logfile -
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
+  # ----------------------------------------------------------------------------
+  # FastAPI Replica 3
+  # ----------------------------------------------------------------------------
+  api_3:
+    <<: *prod-app
+    container_name: realestate_api_prod_3
+    environment:
+      - INSTANCE_ID=api_3
+    command: gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:8000 --access-logfile - --error-logfile -
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
+  # ----------------------------------------------------------------------------
+  # Background ARQ Worker
+  # ----------------------------------------------------------------------------
+  worker:
+    <<: *prod-app
+    container_name: realestate_worker_prod
+    command: arq app.workers.settings.WorkerSettings
+    init: true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.40"
+          memory: 400M
+        reservations:
+          cpus: "0.10"
+          memory: 150M
+
+  # ----------------------------------------------------------------------------
+  # PostgreSQL 16 (Tuned for 4GB RAM Droplet)
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: realestate_postgres_prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-realestate}
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c effective_cache_size=384MB
+      -c work_mem=4MB
+      -c maintenance_work_mem=32MB
+      -c min_wal_size=80MB
+      -c max_wal_size=1GB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=4MB
+      -c max_connections=50
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-realestate}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 700M
+        reservations:
+          cpus: "0.15"
+          memory: 256M
+    networks:
+      - realestate-prod-net
+
+  # ----------------------------------------------------------------------------
+  # PgBouncer (Transaction-Level Connection Pooler)
+  # ----------------------------------------------------------------------------
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: realestate_pgbouncer_prod
+    restart: unless-stopped
+    environment:
+      - DB_USER=${POSTGRES_USER:-postgres}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-realestate}
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=200
+      - LISTEN_PORT=6432
+      - DEFAULT_POOL_SIZE=20
+      - MIN_POOL_SIZE=5
+      - RESERVE_POOL_SIZE=5
+      - SERVER_IDLE_TIMEOUT=60
+      - AUTH_TYPE=scram-sha-256
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-realestate}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.20"
+          memory: 100M
+        reservations:
+          cpus: "0.05"
+          memory: 50M
+    networks:
+      - realestate-prod-net
+
+
+
+  # ----------------------------------------------------------------------------
+  # Redis 7 (Pub/Sub, Rate Limiting & ARQ Queue with AOF Persistence)
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: realestate_redis_prod
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 200mb
+      --maxmemory-policy volatile-lru
+      --save 60 1
+      --appendonly yes
+    volumes:
+      - redisdata_prod:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.30"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+    networks:
+      - realestate-prod-net
+
+
+
+  # ----------------------------------------------------------------------------
+  # Nginx Load Balancer (Single Public Ingress Point)
+  # ----------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: realestate_nginx_prod
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api_1:
+        condition: service_healthy
+      api_2:
+        condition: service_healthy
+      api_3:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.20"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+    networks:
+      - realestate-prod-net
+
+volumes:
+  pgdata_prod:
+  redisdata_prod:
+  uploads_prod:
+
+networks:
+  realestate-prod-net:
+    driver: bridge

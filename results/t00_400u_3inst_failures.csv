@@ -1,0 +1,5 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,POST /conversations,CatchResponseError('create failed: 502'),62,2026-11-08T20:14:09Z,2026-11-08T20:14:29Z
+POST,POST /stream (SSE),CatchResponseError('status 502'),347,2026-11-08T20:14:12Z,2026-11-08T20:14:32Z
+POST,POST /stream (SSE),CatchResponseError('error event: event: error'),408,2026-11-08T20:14:08Z,2026-11-08T20:14:54Z
+POST,POST /conversations,CatchResponseError('create failed: 500'),63,2026-11-08T20:14:09Z,2026-11-08T20:14:35Z

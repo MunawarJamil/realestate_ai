@@ -72,21 +72,21 @@ async def get_current_tenant(
     )
 
 
-
 async def get_streaming_tenant(
     api_key: str | None = Depends(api_key_header),
     auth: HTTPAuthorizationCredentials | None = Depends(_bearer_auth),
     settings: Settings = Depends(get_settings),
 ) -> Tenant:
-    """Authenticates tenant for streaming endpoints using a short-lived DB session.
-
-    Acquires a session for < 1ms to authenticate, then instantly releases the
-    connection back to the pool before the streaming response begins.
-    """
     async with session_scope() as session:
-        return await get_current_tenant(
+        tenant = await get_current_tenant(
             api_key=api_key,
             auth=auth,
             settings=settings,
             session=session,
         )
+        # Detach from session if attached (cached Redis objects are already detached)
+        try:
+            session.expunge(tenant)
+        except Exception:
+            pass
+        return tenant
