@@ -9,13 +9,13 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from app.modules.chat.dependencies import get_chat_service
+from app.modules.chat.dependencies import get_chat_service, get_streaming_chat_service
 from app.modules.chat.enums import ConversationStatus, MessageRole, SenderType
 from app.modules.chat.exceptions import ConversationNotFoundError, InvalidMessageError
 from app.modules.chat.models import Conversation, Message
 from app.modules.chat.router import router
 from app.modules.chat.service import ChatService
-from app.modules.tenants.dependencies import get_current_tenant
+from app.modules.tenants.dependencies import get_current_tenant, get_streaming_tenant
 
 TENANT = SimpleNamespace(id=uuid.uuid4())
 NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
@@ -78,7 +78,9 @@ async def client(service: ChatService) -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[get_current_tenant] = lambda: TENANT
+    app.dependency_overrides[get_streaming_tenant] = lambda: TENANT
     app.dependency_overrides[get_chat_service] = lambda: service
+    app.dependency_overrides[get_streaming_chat_service] = lambda: service
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -199,12 +201,16 @@ async def test_stream_chat_not_found_returns_404(
     client: httpx.AsyncClient, service: ChatService
 ) -> None:
     fake_id = uuid.uuid4()
-    service.get_conversation = AsyncMock(
-        side_effect=ConversationNotFoundError("Not found")
-    )
+
+    async def fake_not_found_stream(**_kwargs: Any) -> AsyncIterator[str]:
+        raise ConversationNotFoundError("Not found")
+        yield ""  # pragma: no cover
+
+    service.stream_chat = fake_not_found_stream  # type: ignore[assignment]
 
     response = await client.post(
         f"/api/v1/chat/conversations/{fake_id}/stream",
         json={"content": "Hi there"},
     )
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert "event: error" in response.text

@@ -16,7 +16,7 @@ from app.core.config import Settings
 from app.core.security import create_visitor_token
 from app.main import create_app
 from app.modules.chat.dependencies import get_chat_service
-from app.modules.chat.enums import MessageRole
+from app.modules.chat.enums import ConversationStatus, MessageRole, SenderType
 from app.modules.chat.exceptions import ConversationNotFoundError
 from app.modules.chat.models import Conversation, Message
 from app.modules.chat.service import ChatService
@@ -55,6 +55,8 @@ def make_conversation(**overrides: Any) -> Conversation:
         "id": uuid.uuid4(),
         "tenant_id": TENANT_ID,
         "title": "Property Inquiry",
+        "status": ConversationStatus.AI,
+        "assigned_agent_id": None,
         "metadata_": {"visitor_id": str(VISITOR_A_ID), "source": "embed_widget"},
         "created_at": NOW,
         "updated_at": NOW,
@@ -64,6 +66,8 @@ def make_conversation(**overrides: Any) -> Conversation:
     conv = Conversation(
         tenant_id=values["tenant_id"],
         title=values["title"],
+        status=values["status"],
+        assigned_agent_id=values["assigned_agent_id"],
         metadata_=meta,
     )
     conv.id = values["id"]
@@ -78,6 +82,8 @@ def make_message(**overrides: Any) -> Message:
         "conversation_id": uuid.uuid4(),
         "tenant_id": TENANT_ID,
         "role": MessageRole.ASSISTANT,
+        "sender_type": SenderType.AI,
+        "agent_id": None,
         "content": "Prices start at $1,200,000.",
         "token_count": 10,
         "created_at": NOW,

@@ -1,6 +1,7 @@
 # Environment & secrets
 .env
 *.env
+.env.prod
 
 # Python virtual environment & cache
 .venv/

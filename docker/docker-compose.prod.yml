@@ -1,6 +1,7 @@
 name: realestate-ai-prod
 
 x-prod-app: &prod-app
+  image: ${APP_IMAGE:-ghcr.io/munawarjamil/realestate_ai:latest}
   build:
     context: ..
     dockerfile: docker/Dockerfile
