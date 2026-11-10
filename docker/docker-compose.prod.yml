@@ -221,6 +221,7 @@ services:
       - "80:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../widget/dist:/var/www/widget:ro
     depends_on:
       api_1:
         condition: service_healthy
