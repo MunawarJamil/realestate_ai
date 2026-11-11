@@ -138,7 +138,9 @@ jobs:
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
             echo "📦 4. Pulling updated prebuilt image..."
-            docker compose -f docker/docker-compose.prod.yml pull api_1 api_2 api_3 worker               echo "🔄 5. Running database migrations..."
+            docker compose -f docker/docker-compose.prod.yml pull api_1 api_2 api_3 worker
+
+            echo "🔄 5. Running database migrations..."
             docker compose --env-file .env -f docker/docker-compose.prod.yml exec -T -e DATABASE_URL="postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-realestate_ai}" api_1 alembic upgrade head
 
             echo "🚀 6. Gracefully reloading containers..."
