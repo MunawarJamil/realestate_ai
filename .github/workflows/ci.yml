@@ -125,9 +125,9 @@ jobs:
           key: ${{ secrets.DO_SSH_KEY }}
           script: |
             set -e
-            cd /opt/realestate_ai || e  xit 1
+            cd /opt/realestate_ai || exit 1
 
-            echo "📥 1. Pulling latest code and con  figs..."
+            echo "📥 1. Pulling latest code and configs..."
             git fetch origin main
             git reset --hard origin/main
 
@@ -141,7 +141,8 @@ jobs:
             docker compose -f docker/docker-compose.prod.yml pull api_1 api_2 api_3 worker
 
             echo "🔄 5. Running database migrations..."
-            docker compose --env-file .env -f docker/docker-compose.prod.yml exec -T -e DATABASE_URL="postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-realestate_ai}" api_1 alembic upgrade head
+            export $(grep -v '^#' .env | xargs)
+            docker compose -f docker/docker-compose.prod.yml exec -T -e DATABASE_URL="postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}" api_1 alembic upgrade head
 
             echo "🚀 6. Gracefully reloading containers..."
             docker compose -f docker/docker-compose.prod.yml up -d --no-build --remove-orphans
