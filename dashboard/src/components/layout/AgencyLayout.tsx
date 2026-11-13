@@ -123,13 +123,7 @@ export const AgencyLayout: React.FC = () => {
 
         {/* Bottom Section */}
         <div className="p-4 border-t border-white/8 space-y-2">
-          <Link
-            to="/platform"
-            className="flex items-center gap-2 text-xs text-[#F97316] hover:text-[#EA580C] px-3 py-2 rounded-lg bg-[#F97316]/10 hover:bg-[#F97316]/15 border border-[#F97316]/20 transition-colors"
-          >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>Switch to Platform Admin</span>
-          </Link>
+
 
           <button
             onClick={handleLogout}

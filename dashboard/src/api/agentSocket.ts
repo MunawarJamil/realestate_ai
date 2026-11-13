@@ -1,4 +1,4 @@
-﻿// # 12c HITL - Socket.IO Client for Agency Dashboard
+// # 12c HITL - Socket.IO Client for Agency Dashboard
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '../store/useAuthStore';
 import type { BackendMessage } from './client';

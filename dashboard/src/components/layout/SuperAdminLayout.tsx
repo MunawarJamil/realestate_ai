@@ -154,13 +154,6 @@ export const SuperAdminLayout: React.FC = () => {
             </div>
           </div>
 
-          <Link
-            to="/app"
-            className="flex items-center justify-between text-xs text-zinc-400 hover:text-zinc-200 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors"
-          >
-            <span>View Agency Portal</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </Link>
 
           <button
             onClick={handleLogout}
