@@ -6,7 +6,6 @@ import {
   ShieldAlert,
   Server,
   LogOut,
-  ExternalLink,
   Cpu,
   ScrollText,
   Menu,
